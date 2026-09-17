@@ -21,8 +21,12 @@ launch.
 
 **Project Settings → Lean Build → Strip UI Toolkit from players.**
 
-Off by default. The setting lives in `ProjectSettings/LeanBuild.asset` and belongs in version
-control: builds differ depending on it.
+Off by default. The setting lives in `ProjectSettings/LeanBuild.asset`. **Commit that file.** It is
+what a headless build reads, so a machine that checks out the project without it builds at full size
+— silently, with no warning. A missing file means the setting is off; nothing fails.
+
+Batch builds are the point, not an afterthought: the trim runs from a build callback and was
+measured under `-batchmode -nographics -quit`.
 
 Nothing else changes. The package stays installed, the manifest is untouched, and the Editor keeps
 UI Toolkit — inspectors, overlays and editor windows written against UIElements are unaffected,

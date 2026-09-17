@@ -1,0 +1,11 @@
+.idea/
+.vs/
+.DS_Store
+Thumbs.db
+*.user
+*.suo
+*.tmp
+*.temp
+bin/
+obj/
+*.tgz

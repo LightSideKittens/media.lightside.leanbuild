@@ -1,0 +1,26 @@
+{
+    "name": "media.lightside.leanbuild",
+    "version": "0.1.0",
+    "displayName": "LightSide Lean Build",
+    "description": "Takes UI Toolkit out of players that never draw with it. Unity seeds its own editor's UI Toolkit types into every player's managed link roots, so the whole UIElements runtime is compiled into a build that cannot use it — removing the package, excluding the engine module and guarding every reference all fail to move it. One project setting removes those roots at build time. Measured on an Android IL2CPP build: 12.96 MiB less code and 1.89 MiB less metadata on disk, 9.87 MiB less resident memory on device. The Editor is unaffected.",
+    "unity": "2022.3",
+    "dependencies": {},
+    "author": {
+        "name": "LightSide",
+        "url": "https://unity.lightside.media"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/LightSideKittens/media.lightside.leanbuild.git"
+    },
+    "documentationUrl": "https://github.com/LightSideKittens/media.lightside.leanbuild#readme",
+    "keywords": [
+        "lightside",
+        "build",
+        "stripping",
+        "ui toolkit",
+        "uielements",
+        "memory"
+    ],
+    "license": "MIT"
+}

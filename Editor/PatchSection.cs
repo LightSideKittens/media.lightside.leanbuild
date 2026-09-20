@@ -7,52 +7,140 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
-namespace LightSide.LeanBuild
+namespace LightSide.Lean
 {
-    /// <summary>The patch list and the drop target that authors one, as they appear in the settings page.</summary>
+    /// <summary>One store's patch list and the drop target that authors one, as they appear in the
+    /// settings page.</summary>
     /// <remarks>
+    /// <para>
     /// Authoring is a drop, not a form, because the path a file already sits at names its package, its
     /// version and its place inside the package. The developer fixes the file where the compiler pointed
     /// them, drops it here, and the archive is written from what the path already says.
+    /// </para>
+    /// <para>
+    /// The two stores are drawn by the same code because they differ only in when what they hold is laid
+    /// down; every gesture — capture, reveal, restore, drop — means the same thing in both. What they do
+    /// not share is the wording, which has to say when a patch takes effect or the page would be telling
+    /// a developer the wrong thing about their own project.
+    /// </para>
     /// </remarks>
     internal static class PatchSection
     {
-        /// <summary>Builds the section under <paramref name="parent"/>.</summary>
-        internal static void Build(VisualElement parent)
+        private const string FoldPreference = "LightSide.Lean.Open.";
+
+        /// <summary>What one section says about itself, where saying the same as the other would mislead.</summary>
+        private readonly struct Copy
         {
-            var card = new VisualElement();
-            card.AddToClassList("leanbuild__card");
-            parent.Add(card);
-
-            card.Add(Label("Patches", "leanbuild__title"));
-            card.Add(Label(
-                "A failing build names the files that keep UI Toolkit in the player. Fix one where it lives, " +
-                "drop it here, and Lean Build writes a patch pinned to that package's installed version. " +
-                "Patches are applied for the length of a build and taken off afterwards, so a machine " +
-                "that downloads its packages fresh every run is patched every run.",
-                "leanbuild__lead"));
-
-            var list = new VisualElement();
-            list.AddToClassList("leanbuild__list");
-            card.Add(BuildDropTarget(() => Refresh(list)));
-
-            var restoreAll = new Button(RestoreAll)
+            internal Copy(string title, string lead, string restores, string absent, string removes)
             {
-                text = "Restore every patched package",
-                tooltip = "Deletes the files of every package a patch covers so Unity lays them down " +
-                          "again. Use it after editing a package in place: the patch already carries " +
-                          "your change, and the copy inside the package is what the editor compiles.",
-            };
-            restoreAll.AddToClassList("leanbuild__wide");
-            card.Add(restoreAll);
+                Title = title;
+                Lead = lead;
+                Restores = restores;
+                Absent = absent;
+                Removes = removes;
+            }
 
-            card.Add(list);
-            Refresh(list);
+            /// <summary>The section's heading.</summary>
+            internal string Title { get; }
+
+            /// <summary>What the section holds and when it takes effect.</summary>
+            internal string Lead { get; }
+
+            /// <summary>What happens to the patch after the package is laid down again.</summary>
+            internal string Restores { get; }
+
+            /// <summary>Why a patched file may not be inside its package at this moment.</summary>
+            internal string Absent { get; }
+
+            /// <summary>What dropping a patch does beyond deleting it, or null when it does nothing.</summary>
+            internal string Removes { get; }
         }
 
-        private static VisualElement BuildDropTarget(Action changed)
+        private static readonly Copy ForBuild = new(
+            "Build Patches",
+            "Fix a package file where it lives, drop it here, and Lean writes an archive pinned to that " +
+            "package's installed version. These are laid over their packages before a build compiles the " +
+            "player and taken off afterwards, so a machine that downloads its packages fresh on every run " +
+            "is patched on every run.",
+            "this patch keeps your change and lays it back over the package on the next build.",
+            "a build patch lays its files down only for the length of a build.",
+            null);
+
+        private static readonly Copy ForPermanent = new(
+            "Permanent Patches",
+            "The same archives, except that these stay on. They are laid down again whenever Unity puts a " +
+            "package back — on editor load, when the registered packages change, and before a build — so " +
+            "a package whose own source does not compile against this project is fixed in the Editor, in " +
+            "batch mode and on a build agent, and not only in the player.",
+            "this patch keeps your change and Lean lays it back over the package once Unity has finished.",
+            "a permanent patch is laid down again on the next editor load.",
+            "Unity lays that package's own files down again afterwards, and whatever still patches it is " +
+            "put back.");
+
+        /// <summary>Builds <paramref name="store"/>'s section under <paramref name="parent"/>.</summary>
+        internal static void Build(VisualElement parent, PatchStore store)
         {
-            var drop = Label("Drop fixed package files here", "leanbuild__drop");
+            var copy = store == PatchStore.Permanent ? ForPermanent : ForBuild;
+
+            var card = new VisualElement();
+            card.AddToClassList("lean__card");
+            parent.Add(card);
+
+            var chevron = Chevron();
+            var badge = Label(string.Empty, "lean__count");
+            var header = new VisualElement();
+            header.AddToClassList("lean__header");
+            header.Add(chevron);
+            header.Add(Label(copy.Title, "lean__title"));
+            header.Add(badge);
+            card.Add(header);
+
+            var content = new VisualElement();
+            content.AddToClassList("lean__content");
+            card.Add(content);
+
+            var key = FoldPreference + store.Directory;
+            var open = EditorPrefs.GetBool(key, false);
+
+            void Fold(bool value, bool animate)
+            {
+                open = value;
+                EditorPrefs.SetBool(key, value);
+                Unroll.Set(content, value, animate);
+                chevron.EnableInClassList("lean__chevron--open", value);
+            }
+
+            Fold(open, false);
+            header.AddManipulator(new Clickable(() => Fold(!open, true)));
+
+            var list = new VisualElement();
+            list.AddToClassList("lean__list");
+
+            void Refresh()
+            {
+                list.Clear();
+                var stored = store.Read();
+                badge.text = stored.Count.ToString();
+                badge.style.display = stored.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+
+                if (stored.Count == 0)
+                {
+                    list.Add(Label($"No {copy.Title.ToLowerInvariant()} in this project.", "lean__empty"));
+                    return;
+                }
+                foreach (var patch in stored) list.Add(BuildPatch(patch, store, copy, Refresh));
+            }
+
+            content.Add(Label(copy.Lead, "lean__lead"));
+            content.Add(BuildDropTarget(store, Refresh));
+            content.Add(BuildRestoreAll(store));
+            content.Add(list);
+            Refresh();
+        }
+
+        private static VisualElement BuildDropTarget(PatchStore store, Action changed)
+        {
+            var drop = Label("Drop fixed package files here", "lean__drop");
             drop.pickingMode = PickingMode.Position;
             drop.RegisterCallback<DragUpdatedEvent>(_ =>
             {
@@ -66,7 +154,7 @@ namespace LightSide.LeanBuild
                 var sources = Resolve(DragAndDrop.paths);
                 if (sources.Count == 0)
                 {
-                    Debug.LogWarning("[LeanBuild] Those files are not inside an installed package, " +
+                    Debug.LogWarning("[Lean] Those files are not inside an installed package, " +
                                      "so there is nothing to patch.");
                     return;
                 }
@@ -75,13 +163,13 @@ namespace LightSide.LeanBuild
                 {
                     try
                     {
-                        var path = PatchStore.Add(group.ToArray());
-                        Debug.Log($"[LeanBuild] Wrote {path} for {group.Key}@{group.First().Package.version}: " +
+                        var path = store.Add(group.ToArray());
+                        Debug.Log($"[Lean] Wrote {path} for {group.Key}@{group.First().Package.version}: " +
                                   string.Join(", ", group.Select(source => source.Relative)));
                     }
                     catch (Exception e) when (e is ArgumentException or IOException)
                     {
-                        Debug.LogWarning($"[LeanBuild] Could not write a patch for {group.Key}: {e.Message}");
+                        Debug.LogWarning($"[Lean] Could not write a patch for {group.Key}: {e.Message}");
                     }
                 }
                 changed();
@@ -98,102 +186,107 @@ namespace LightSide.LeanBuild
             return sources;
         }
 
-        private static void Refresh(VisualElement list)
-        {
-            list.Clear();
-            var paths = PatchStore.Paths();
-            if (paths.Count == 0)
-            {
-                list.Add(Label("No patches in this project.", "leanbuild__empty"));
-                return;
-            }
-
-            foreach (var path in paths) list.Add(BuildPatch(path, () => Refresh(list)));
-        }
-
-        private static VisualElement BuildPatch(string path, Action changed)
+        private static VisualElement BuildPatch(StoredPatch stored, PatchStore store, Copy copy,
+            Action changed)
         {
             var block = new VisualElement();
-            block.AddToClassList("leanbuild__patch");
+            block.AddToClassList("lean__patch");
+            var name = Path.GetFileName(stored.Path);
 
-            PackagePatch patch;
-            try
+            if (stored.Patch == null)
             {
-                patch = PackagePatch.Read(path);
-            }
-            catch (Exception e) when (e is InvalidDataException or IOException)
-            {
-                var name = Path.GetFileName(path);
-                block.Add(Row(Label($"{name} — unreadable: {e.Message}", "leanbuild__subtitle"),
+                block.Add(Row(Label($"{name} — unreadable", "lean__subtitle"),
                     Remove($"Delete {name}", () =>
                     {
                         if (!Confirm($"Delete {name}?\n\nIt cannot be read, so what it holds cannot be " +
                                      "shown here — it may still carry edits of yours."))
                             return;
-                        PatchStore.Remove(path);
+                        PatchStore.Remove(stored.Path);
                         changed();
                     })));
+                block.Add(Label(stored.Problem, "lean__problem"));
                 return block;
             }
 
+            var patch = stored.Patch;
             var entries = patch.Entries;
             var header = new VisualElement();
-            header.AddToClassList("leanbuild__row");
-            header.Add(Label($"{patch.Package}@{patch.Version}", "leanbuild__subtitle"));
-            header.Add(Action("↗", $"Open {patch.Package}'s folder in the file browser.",
-                () => Reveal(patch.Package, "package.json")));
-            header.Add(Action("↺", $"Delete {patch.Package}'s files so Unity lays the package down again; " +
-                                   "this patch keeps your change and applies it at build time.",
-                () => Restore(patch.Package)));
+            header.AddToClassList("lean__row");
+            header.Add(Label($"{patch.Package}@{patch.Version}", "lean__subtitle"));
+            if (stored.Usable)
+            {
+                header.Add(Action("↗", $"Open {patch.Package}'s folder in the file browser.",
+                    () => Reveal(patch.Package, "package.json", copy)));
+                header.Add(Action("↺", $"Delete {patch.Package}'s files so Unity lays the package down " +
+                                       $"again; {copy.Restores}",
+                    () => Restore(patch.Package)));
+            }
             header.Add(Remove($"Drop the whole patch for {patch.Package}", () =>
             {
                 if (!Confirm($"Delete the patch for {patch.Package}@{patch.Version}?\n\n" +
                              $"It is the only copy of your edits to {entries.Count} " +
                              $"{(entries.Count == 1 ? "file" : "files")}, unless the archive is under " +
-                             "version control."))
+                             "version control." + Aftermath(copy)))
                     return;
-                PatchStore.Remove(path);
-                changed();
+                PatchStore.Remove(stored.Path);
+                Dropped(stored, store, changed);
             }));
             block.Add(header);
+
+            if (stored.Problem != null) block.Add(Label(stored.Problem, "lean__problem"));
+            else if (stored.Concern != null) block.Add(Label(stored.Concern, "lean__problem"));
 
             foreach (var entry in entries)
             {
                 var relative = entry;
-                var file = Label(relative, "leanbuild__file");
+                var file = Label(relative, "lean__file");
                 file.tooltip = relative;
                 file.pickingMode = PickingMode.Position;
 
                 var row = Row(file,
                     Action("↗", $"Show {relative} in the file browser.",
-                        () => Reveal(patch.Package, relative)),
+                        () => Reveal(patch.Package, relative, copy)),
                     Remove($"Stop patching {relative}", () =>
                     {
                         if (!Confirm($"Stop patching {relative}?\n\nThis drops your edited copy of the file" +
                                      (entries.Count == 1
                                          ? $", and with it the whole patch for {patch.Package}."
-                                         : ".")))
+                                         : ".") + Aftermath(copy)))
                             return;
-                        PatchStore.Remove(path, relative);
-                        changed();
+                        PatchStore.Remove(stored.Path, relative);
+                        Dropped(stored, store, changed);
                     }));
-                row.AddToClassList("leanbuild__row--file");
+                row.AddToClassList("lean__row--file");
                 block.Add(row);
             }
             return block;
         }
 
         /// <summary>
+        /// Puts the package back after a patch that was on it is dropped, so what is on disk is what the
+        /// project now asks for rather than the last thing written to it.
+        /// </summary>
+        /// <remarks>Only a permanent patch is on the package outside a build; a build patch was taken off
+        /// when its build ended, so there is nothing of it left to undo.</remarks>
+        private static void Dropped(StoredPatch stored, PatchStore store, Action changed)
+        {
+            if (store == PatchStore.Permanent && stored.Target != null) Restore(stored.Patch.Package);
+            changed();
+        }
+
+        private static string Aftermath(Copy copy) => copy.Removes == null ? string.Empty : "\n\n" + copy.Removes;
+
+        /// <summary>
         /// Asks before a deletion, because a patch is where the developer's edit lives: the copy inside
         /// the package is overwritten on the next resolve, so nothing else in the project has it.
         /// </summary>
         private static bool Confirm(string message) =>
-            EditorUtility.DisplayDialog("Lean Build", message, "Delete", "Cancel");
+            EditorUtility.DisplayDialog("Lean", message, "Delete", "Cancel");
 
         private static VisualElement Row(params VisualElement[] items)
         {
             var row = new VisualElement();
-            row.AddToClassList("leanbuild__row");
+            row.AddToClassList("lean__row");
             foreach (var item in items) row.Add(item);
             return row;
         }
@@ -202,39 +295,42 @@ namespace LightSide.LeanBuild
         private static Button Remove(string tooltip, Action clicked)
         {
             var button = new Button(clicked) { text = "−", tooltip = tooltip };
-            button.AddToClassList("leanbuild__remove");
+            button.AddToClassList("lean__remove");
             return button;
         }
 
         private static Button Action(string glyph, string tooltip, Action clicked)
         {
             var button = new Button(clicked) { text = glyph, tooltip = tooltip };
-            button.AddToClassList("leanbuild__action");
+            button.AddToClassList("lean__action");
             return button;
         }
 
         /// <summary>Restores every package a patch covers, so nothing has to be hunted for by hand.</summary>
-        private static void RestoreAll()
+        private static Button BuildRestoreAll(PatchStore store)
         {
-            var packages = new List<string>();
-            foreach (var path in PatchStore.Paths())
+            var button = new Button(() =>
             {
-                try
+                var packages = store.Read()
+                    .Where(stored => stored.Usable)
+                    .Select(stored => stored.Patch.Package)
+                    .Distinct()
+                    .ToArray();
+                if (packages.Length == 0)
                 {
-                    packages.Add(PackagePatch.Read(path).Package);
+                    Debug.Log("[Lean] No patched packages to restore.");
+                    return;
                 }
-                catch (Exception e) when (e is InvalidDataException or IOException)
-                {
-                    Debug.LogWarning($"[LeanBuild] Skipped '{Path.GetFileName(path)}': {e.Message}");
-                }
-            }
-
-            if (packages.Count == 0)
+                foreach (var package in packages) Restore(package);
+            })
             {
-                Debug.Log("[LeanBuild] No patched packages to restore.");
-                return;
-            }
-            foreach (var package in packages.Distinct()) Restore(package);
+                text = "Restore every patched package",
+                tooltip = "Deletes the files of every package a patch covers so Unity lays them down " +
+                          "again. Use it after editing a package in place: the patch already carries " +
+                          "your change, and the copy inside the package is what the editor compiles.",
+            };
+            button.AddToClassList("lean__wide");
+            return button;
         }
 
         private static void Restore(string package)
@@ -244,12 +340,13 @@ namespace LightSide.LeanBuild
 
             try
             {
+                PermanentPatches.ExpectRestore(package);
                 PatchStore.RestorePackage(info);
-                Debug.Log($"[LeanBuild] Deleted {package}'s files; Unity is laying the package down again.");
+                Debug.Log($"[Lean] Deleted {package}'s files; Unity is laying the package down again.");
             }
             catch (Exception e) when (e is InvalidOperationException or IOException)
             {
-                Debug.LogWarning($"[LeanBuild] Could not restore {package}: {e.Message}");
+                Debug.LogWarning($"[Lean] Could not restore {package}: {e.Message}");
             }
         }
 
@@ -257,7 +354,7 @@ namespace LightSide.LeanBuild
         /// <remarks>Windows and macOS reveal a folder by selecting it in its parent instead of opening it,
         /// so a file inside is always what gets pointed at — the manifest every registered package carries,
         /// when the package as a whole is meant.</remarks>
-        private static void Reveal(string package, string relative)
+        private static void Reveal(string package, string relative, Copy copy)
         {
             var info = Installed(package);
             if (info == null) return;
@@ -265,8 +362,7 @@ namespace LightSide.LeanBuild
             var file = Path.Combine(info.resolvedPath, relative);
             if (!File.Exists(file))
             {
-                Debug.LogWarning($"[LeanBuild] '{relative}' is not in {package} right now — a patch lays " +
-                                 "its files down only for the length of a build.");
+                Debug.LogWarning($"[Lean] '{relative}' is not in {package} right now — {copy.Absent}");
                 return;
             }
             EditorUtility.RevealInFinder(file);
@@ -276,7 +372,7 @@ namespace LightSide.LeanBuild
         {
             var info = PackageInfo.GetAllRegisteredPackages()
                 .FirstOrDefault(candidate => candidate.name == package);
-            if (info == null) Debug.LogWarning($"[LeanBuild] '{package}' is not installed in this project.");
+            if (info == null) Debug.LogWarning($"[Lean] '{package}' is not installed in this project.");
             return info;
         }
 
@@ -285,6 +381,25 @@ namespace LightSide.LeanBuild
             var label = new Label(text) { pickingMode = PickingMode.Ignore };
             label.AddToClassList(className);
             return label;
+        }
+
+        /// <summary>A fold marker drawn the LightSide way: two accent strokes, turned by the stylesheet.</summary>
+        /// <remarks>Two strokes rather than one of the triangles a font carries, because those are sized
+        /// and placed by the editor font's own metrics — different on every platform, and centred on a
+        /// text baseline rather than on the row.</remarks>
+        private static VisualElement Chevron()
+        {
+            var chevron = Mark("lean__chevron");
+            chevron.Add(Mark("lean__chevron-top"));
+            chevron.Add(Mark("lean__chevron-bottom"));
+            return chevron;
+        }
+
+        private static VisualElement Mark(string className)
+        {
+            var mark = new VisualElement { pickingMode = PickingMode.Ignore };
+            mark.AddToClassList(className);
+            return mark;
         }
     }
 }

@@ -1,8 +1,8 @@
 {
-    "name": "media.lightside.leanbuild",
-    "version": "0.2.0",
-    "displayName": "LightSide Lean Build",
-    "description": "Takes UI Toolkit out of players that never draw with it. Unity seeds its own editor's UI Toolkit types into every player's managed link roots, so the whole UIElements runtime is compiled into a build that cannot use it — removing the package or guarding every reference does not move it. One project setting cuts those roots and holds the engine module out of the player's compilation, so a build that would still carry UI Toolkit fails naming the files to fix rather than shipping it; fixes to package files are kept as patches and reapplied on every build. Measured on an Android IL2CPP build: 12.96 MiB less code and 1.89 MiB less metadata on disk, 9.87 MiB less resident memory on device. The Editor is unaffected.",
+    "name": "media.lightside.lean",
+    "version": "0.3.0",
+    "displayName": "LightSide Lean",
+    "description": "Takes out of a Unity project what Unity will not let you take out, and patches whatever breaks. Unity seeds its own editor's UI Toolkit types into every player's managed link roots, so the whole UIElements runtime is compiled into a build that cannot use it — removing the package or guarding every reference does not move it. One project setting cuts those roots and holds the engine module out of the player's compilation, so a build that would still carry UI Toolkit fails naming the files to fix rather than shipping it. Measured on an Android IL2CPP build: 12.96 MiB less code and 1.89 MiB less metadata on disk, 9.87 MiB less resident memory on device. Fixes to files inside other people's packages are kept as archives in the project and laid down again whenever Unity restores a package — for the length of a build, or permanently, in the Editor, in batch mode and on a build agent. No vendoring, no embedded copies, no lost package updates.",
     "unity": "2022.3",
     "dependencies": {},
     "author": {
@@ -20,7 +20,9 @@
         "stripping",
         "ui toolkit",
         "uielements",
-        "memory"
+        "memory",
+        "patch",
+        "package"
     ],
     "license": "MIT"
 }

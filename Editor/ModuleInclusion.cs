@@ -1,7 +1,7 @@
 using System;
 using System.Reflection;
 
-namespace LightSide.LeanBuild
+namespace LightSide.Lean
 {
     /// <summary>Whether a build includes an engine module, independently of what references it.</summary>
     /// <remarks>Values mirror <c>UnityEditor.ModuleIncludeSetting</c> and are written to the build as-is.</remarks>

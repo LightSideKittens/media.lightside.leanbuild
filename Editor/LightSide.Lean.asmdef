@@ -1,6 +1,6 @@
 {
-    "name": "LightSide.LeanBuild",
-    "rootNamespace": "LightSide.LeanBuild",
+    "name": "LightSide.Lean",
+    "rootNamespace": "LightSide.Lean",
     "references": [],
     "includePlatforms": [
         "Editor"

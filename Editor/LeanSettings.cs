@@ -3,17 +3,16 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace LightSide.LeanBuild
+namespace LightSide.Lean
 {
-    /// <summary>Project-wide switches for what Lean Build keeps out of a player.</summary>
-    /// <remarks>Stored in <c>ProjectSettings/LeanBuild.asset</c> and meant to be committed: a build
+    /// <summary>Project-wide switches for what Lean keeps out of a player.</summary>
+    /// <remarks>Stored in <c>ProjectSettings/LightSideLean.asset</c> and meant to be committed: a build
     /// produces different content depending on it.</remarks>
-    [FilePath(SettingsPath, FilePathAttribute.Location.ProjectFolder)]
-    internal sealed class LeanBuildSettings : ScriptableSingleton<LeanBuildSettings>
+    [FilePath(LeanPaths.Settings, FilePathAttribute.Location.ProjectFolder)]
+    internal sealed class LeanSettings : ScriptableSingleton<LeanSettings>
     {
-        private const string SettingsPath = "ProjectSettings/LeanBuild.asset";
-        private const string SettingsMenuPath = "Project/LightSide/Lean Build";
-        private const string StyleSheetName = "LightSideLeanBuild";
+        private const string SettingsMenuPath = "Project/LightSide/Lean";
+        private const string StyleSheetName = "LightSideLean";
 
         [SerializeField] private bool stripUIToolkit;
 
@@ -22,12 +21,25 @@ namespace LightSide.LeanBuild
         /// <summary>Whether players built from this project drop UI Toolkit's managed code.</summary>
         internal static bool StripUIToolkit
         {
-            get => instance.stripUIToolkit;
+            get => Current.stripUIToolkit;
             set
             {
-                if (instance.stripUIToolkit == value) return;
-                instance.stripUIToolkit = value;
-                instance.Save(true);
+                if (Current.stripUIToolkit == value) return;
+                Current.stripUIToolkit = value;
+                Current.Save(true);
+            }
+        }
+
+        /// <summary>The settings, with anything left under the package's former names taken over first.</summary>
+        /// <remarks>Reading before the move would load a fresh instance with every value at its default
+        /// and leave the developer's own switch behind, so the move happens on the way in rather than from
+        /// a load callback whose order against this read is undefined.</remarks>
+        private static LeanSettings Current
+        {
+            get
+            {
+                LeanPaths.Adopt();
+                return instance;
             }
         }
 
@@ -35,32 +47,35 @@ namespace LightSide.LeanBuild
         private static SettingsProvider Provider() =>
             new SettingsProvider(SettingsMenuPath, SettingsScope.Project)
             {
-                label = "Lean Build",
-                keywords = new[] { "UI Toolkit", "UIElements", "stripping", "build size", "memory" },
+                label = "Lean",
+                keywords = new[]
+                {
+                    "UI Toolkit", "UIElements", "stripping", "build size", "memory", "patch", "package",
+                },
                 activateHandler = (_, root) => Build(root),
             };
 
         private static void Build(VisualElement root)
         {
             var page = new ScrollView(ScrollViewMode.Vertical);
-            page.AddToClassList("leanbuild");
-            page.EnableInClassList("leanbuild--dark", EditorGUIUtility.isProSkin);
-            page.EnableInClassList("leanbuild--light", !EditorGUIUtility.isProSkin);
-            page.contentContainer.AddToClassList("leanbuild__page");
+            page.AddToClassList("lean");
+            page.EnableInClassList("lean--dark", EditorGUIUtility.isProSkin);
+            page.EnableInClassList("lean--light", !EditorGUIUtility.isProSkin);
+            page.contentContainer.AddToClassList("lean__page");
             page.styleSheets.Add(Style());
             root.Add(page);
 
             var card = new VisualElement();
-            card.AddToClassList("leanbuild__card");
+            card.AddToClassList("lean__card");
             page.Add(card);
 
-            card.Add(Text("Lean Build", "leanbuild__title"));
+            card.Add(Text("Strip UI Toolkit", "lean__title"));
             card.Add(Text(
                 "Unity seeds its own editor's UI Toolkit types into every player's managed link roots, " +
                 "so the UIElements runtime is compiled into builds that cannot use it. Removing the " +
                 "package or guarding every reference does not take it out; cutting those roots and " +
                 "holding the module out of the player's compilation does.",
-                "leanbuild__lead"));
+                "lean__lead"));
 
             var note = Text(
                 "Builds fail until no player code reaches UI Toolkit. The module is held out of the " +
@@ -70,7 +85,7 @@ namespace LightSide.LeanBuild
                 "Once a build passes, players no longer run UI Toolkit. Anything that needs it at run " +
                 "time stops working, including a UIDocument placed in a scene, which the compiler cannot " +
                 "warn about.",
-                "leanbuild__note");
+                "lean__note");
             note.style.display = StripUIToolkit ? DisplayStyle.Flex : DisplayStyle.None;
 
             var strip = Checkbox("Strip UI Toolkit from players");
@@ -83,24 +98,25 @@ namespace LightSide.LeanBuild
             card.Add(strip);
             card.Add(note);
 
-            PatchSection.Build(page);
+            PatchSection.Build(page, PatchStore.Build);
+            PatchSection.Build(page, PatchStore.Permanent);
         }
 
         /// <summary>A checkbox drawn the LightSide way: the engine's tick replaced by two accent strokes.</summary>
         private static Toggle Checkbox(string text)
         {
             var toggle = new Toggle { text = text };
-            toggle.AddToClassList("leanbuild__toggle");
-            Tag(toggle, Toggle.inputUssClassName, "leanbuild__input");
-            Tag(toggle, Toggle.textUssClassName, "leanbuild__text");
+            toggle.AddToClassList("lean__toggle");
+            Tag(toggle, Toggle.inputUssClassName, "lean__input");
+            Tag(toggle, Toggle.textUssClassName, "lean__text");
 
             var checkmark = toggle.Q<VisualElement>(className: Toggle.checkmarkUssClassName)
                             ?? throw new InvalidOperationException("The toggle has no checkmark element.");
-            checkmark.AddToClassList("leanbuild__checkmark");
+            checkmark.AddToClassList("lean__checkmark");
             var mark = new VisualElement { pickingMode = PickingMode.Ignore };
-            mark.AddToClassList("leanbuild__mark");
-            mark.Add(Stroke("leanbuild__mark-short"));
-            mark.Add(Stroke("leanbuild__mark-long"));
+            mark.AddToClassList("lean__mark");
+            mark.Add(Stroke("lean__mark-short"));
+            mark.Add(Stroke("lean__mark-long"));
             checkmark.Add(mark);
             return toggle;
         }
@@ -127,6 +143,6 @@ namespace LightSide.LeanBuild
         private static StyleSheet Style() =>
             styleSheet ??= Resources.Load<StyleSheet>(StyleSheetName)
                            ?? throw new InvalidOperationException(
-                               $"The Lean Build stylesheet '{StyleSheetName}' is missing from the package.");
+                               $"The Lean stylesheet '{StyleSheetName}' is missing from the package.");
     }
 }

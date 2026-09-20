@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 
-namespace LightSide.LeanBuild
+namespace LightSide.Lean
 {
     /// <summary>Names the player assemblies whose own code reaches UI Toolkit.</summary>
     /// <remarks>

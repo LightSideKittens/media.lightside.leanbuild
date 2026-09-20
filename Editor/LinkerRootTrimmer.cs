@@ -10,10 +10,10 @@ using UnityEditor.Build.Reporting;
 using UnityEditor.UnityLinker;
 using UnityEngine;
 
-namespace LightSide.LeanBuild
+namespace LightSide.Lean
 {
     /// <summary>
-    /// Takes UI Toolkit out of the player while <see cref="LeanBuildSettings.StripUIToolkit"/> is on: the
+    /// Takes UI Toolkit out of the player while <see cref="LeanSettings.StripUIToolkit"/> is on: the
     /// roots the editor seeds into the managed link, and the engine module itself.
     /// </summary>
     /// <remarks>
@@ -46,8 +46,7 @@ namespace LightSide.LeanBuild
         private const string Module = "UnityEngine.UIElementsModule";
         private const string EngineModule = "UIElements";
         private const string InputsDirectory = "Library/Bee/artifacts/UnityLinkerInputs";
-        private const string OwnDirectory = "Library/LightSide";
-        private const string OwnFile = "LeanBuild.link.xml";
+        private const string OwnFile = "Lean.link.xml";
 
         private static readonly string[] Inputs = { "TypesInScenes.xml", "SerializedTypes.xml" };
 
@@ -57,7 +56,7 @@ namespace LightSide.LeanBuild
         /// <inheritdoc/>
         public string GenerateAdditionalLinkXmlFile(BuildReport report, UnityLinkerBuildPipelineData data)
         {
-            if (LeanBuildSettings.StripUIToolkit) Trim();
+            if (LeanSettings.StripUIToolkit) Trim();
             return WriteEmptyDocument();
         }
 
@@ -73,17 +72,17 @@ namespace LightSide.LeanBuild
         /// </remarks>
         public void OnPreprocessBuild(BuildReport report)
         {
-            if (!LeanBuildSettings.StripUIToolkit) return;
+            if (!LeanSettings.StripUIToolkit) return;
             if (!ModuleInclusion.Supported)
             {
-                Debug.LogWarning("[LeanBuild] This editor does not expose engine module inclusion, so only " +
+                Debug.LogWarning("[Lean] This editor does not expose engine module inclusion, so only " +
                                  "the editor's own roots can be cut; player code that reaches UI Toolkit " +
                                  "keeps the module, and this build reports that when it ends.");
                 return;
             }
             if (!ModuleInclusion.IsStrippable(EngineModule))
             {
-                Debug.LogWarning($"[LeanBuild] This editor reports '{EngineModule}' as not strippable, so " +
+                Debug.LogWarning($"[Lean] This editor reports '{EngineModule}' as not strippable, so " +
                                  "only the editor's own roots can be cut; player code that reaches UI " +
                                  "Toolkit keeps the module, and this build reports that when it ends.");
                 return;
@@ -91,7 +90,7 @@ namespace LightSide.LeanBuild
 
             ModuleInclusion.Set(EngineModule, ModuleInclusionState.ForceExclude);
             EditorApplication.delayCall += RestoreInclusion;
-            Debug.Log("[LeanBuild] UI Toolkit is held out of this build's player compilation. " +
+            Debug.Log("[Lean] UI Toolkit is held out of this build's player compilation. " +
                       "Every compiler error below names a player file that uses it.");
         }
 
@@ -104,25 +103,25 @@ namespace LightSide.LeanBuild
         /// scheduled alongside the exclusion is what actually covers a failed build — it runs on the first
         /// editor tick after the build returns, whichever way it went.
         /// </remarks>
-        [MenuItem("Tools/LightSide/Lean Build/Restore module inclusion")]
+        [MenuItem("Tools/LightSide/Lean/Restore module inclusion")]
         internal static void RestoreInclusion()
         {
             if (!ModuleInclusion.Supported) return;
             if (ModuleInclusion.Get(EngineModule) == ModuleInclusionState.Auto) return;
             ModuleInclusion.Set(EngineModule, ModuleInclusionState.Auto);
-            Debug.Log($"[LeanBuild] Engine module '{EngineModule}' is back under Unity's own decision.");
+            Debug.Log($"[Lean] Engine module '{EngineModule}' is back under Unity's own decision.");
         }
 
         /// <inheritdoc/>
         public void OnPostprocessBuild(BuildReport report)
         {
             RestoreInclusion();
-            if (!LeanBuildSettings.StripUIToolkit) return;
+            if (!LeanSettings.StripUIToolkit) return;
 
             var stripping = report.strippingInfo;
             if (stripping == null)
             {
-                Debug.LogWarning("[LeanBuild] This build target does not report engine module stripping, " +
+                Debug.LogWarning("[Lean] This build target does not report engine module stripping, " +
                                  "so whether UI Toolkit left the player cannot be confirmed here.");
                 return;
             }
@@ -130,7 +129,7 @@ namespace LightSide.LeanBuild
             var modules = stripping.includedModules.ToArray();
             if (modules.Length == 0)
             {
-                Debug.LogWarning("[LeanBuild] This build reported no engine modules at all, so whether " +
+                Debug.LogWarning("[Lean] This build reported no engine modules at all, so whether " +
                                  "UI Toolkit left the player cannot be confirmed here.");
                 return;
             }
@@ -139,12 +138,12 @@ namespace LightSide.LeanBuild
                 .FirstOrDefault(module => module.StartsWith(EngineModule, StringComparison.OrdinalIgnoreCase));
             if (included == null)
             {
-                Debug.Log("[LeanBuild] UI Toolkit's engine module is not in this player.");
+                Debug.Log("[Lean] UI Toolkit's engine module is not in this player.");
                 return;
             }
 
             var message = new StringBuilder()
-                .AppendLine("[LeanBuild] UI Toolkit's engine module is still in this player.")
+                .AppendLine("[Lean] UI Toolkit's engine module is still in this player.")
                 .AppendLine("The editor's roots were removed, but the linker reaches the module from the")
                 .AppendLine("player's own code, so nothing was saved.");
 
@@ -214,14 +213,14 @@ namespace LightSide.LeanBuild
                     .ToArray();
                 foreach (var root in roots) root.Remove();
                 document.Save(path);
-                Debug.Log($"[LeanBuild] Dropped from {name}: {string.Join(", ", types)}.");
+                Debug.Log($"[Lean] Dropped from {name}: {string.Join(", ", types)}.");
             }
         }
 
         private static string WriteEmptyDocument()
         {
-            Directory.CreateDirectory(OwnDirectory);
-            var path = Path.Combine(OwnDirectory, OwnFile);
+            Directory.CreateDirectory(LeanPaths.Work);
+            var path = Path.Combine(LeanPaths.Work, OwnFile);
             new XDocument(new XElement("linker")).Save(path);
             return path;
         }

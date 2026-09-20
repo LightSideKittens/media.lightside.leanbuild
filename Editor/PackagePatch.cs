@@ -8,7 +8,7 @@ using UnityEngine;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 using PackageSource = UnityEditor.PackageManager.PackageSource;
 
-namespace LightSide.LeanBuild
+namespace LightSide.Lean
 {
     /// <summary>
     /// One archive of replacement files for an installed package: entry paths are relative to the
@@ -32,6 +32,10 @@ namespace LightSide.LeanBuild
     /// </remarks>
     internal sealed class PackagePatch
     {
+        /// <summary>Name of the manifest inside an archive.</summary>
+        /// <remarks>Written into every archive ever produced, so it keeps the name the package had when
+        /// the format was settled; renaming it would make every existing patch unreadable to buy
+        /// nothing a reader can see.</remarks>
         internal const string ManifestEntry = ".leanbuild-patch.json";
 
         private Manifest manifest;
@@ -82,7 +86,7 @@ namespace LightSide.LeanBuild
             if (target == null) return $"'{Package}' is not installed in this project.";
             if (target.source is PackageSource.Embedded or PackageSource.Local)
                 return $"'{Package}' is {target.source} — its source belongs to this project, " +
-                       "so edit it in place instead of patching it for one build.";
+                       "so edit it in place instead of patching it.";
             return null;
         }
 
@@ -97,12 +101,19 @@ namespace LightSide.LeanBuild
                   "if upstream changed these files since, this patch puts the older ones back.";
 
         /// <summary>
-        /// Writes the archive's files into <paramref name="root"/>, copying each original it overwrites
-        /// into <paramref name="backup"/> under the same relative path first. Files the package did not
-        /// have are recorded in <paramref name="added"/> so they can be deleted again.
+        /// Writes the archive's files into <paramref name="root"/> and returns how many it wrote.
         /// </summary>
-        internal void Apply(string root, string backup, ICollection<string> replaced, ICollection<string> added)
+        /// <remarks>
+        /// What an undo needs is gathered only when it is asked for: each original that is overwritten is
+        /// copied into <paramref name="backup"/> under the same relative path and named in
+        /// <paramref name="replaced"/>, and files the package did not have are named in
+        /// <paramref name="added"/> so they can be deleted again. A patch that is never taken off passes
+        /// none of the three, and what it replaces is gone.
+        /// </remarks>
+        internal int Apply(string root, string backup = null, ICollection<string> replaced = null,
+            ICollection<string> added = null)
         {
+            var written = 0;
             using var archive = ZipFile.OpenRead(Path);
             foreach (var entry in archive.Entries)
             {
@@ -114,15 +125,20 @@ namespace LightSide.LeanBuild
 
                 if (File.Exists(destination))
                 {
-                    var saved = System.IO.Path.Combine(backup, relative);
-                    Directory.CreateDirectory(System.IO.Path.GetDirectoryName(saved)!);
-                    File.Copy(destination, saved, true);
-                    replaced.Add(relative);
+                    if (backup != null)
+                    {
+                        var saved = System.IO.Path.Combine(backup, relative);
+                        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(saved)!);
+                        File.Copy(destination, saved, true);
+                    }
+                    replaced?.Add(relative);
                 }
-                else added.Add(relative);
+                else added?.Add(relative);
 
                 entry.ExtractToFile(destination, true);
+                written++;
             }
+            return written;
         }
 
         /// <summary>Whether <paramref name="root"/> already carries exactly this patch's files.</summary>

@@ -5,7 +5,7 @@ on:
     tags: ["v*"]
 
 env:
-  PACKAGE: media.lightside.leanbuild
+  PACKAGE: media.lightside.lean
 
 jobs:
   publish:
@@ -71,10 +71,8 @@ jobs:
             PRERELEASE="${VERSION#*-}"
             TAG="${PRERELEASE%%.*}"
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "Detected pre-release: tag=$TAG"
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
             CURRENT=$(curl -sf -H "Authorization: Bearer ${{ secrets.REGISTRY_TOKEN }}" \
               "https://registry.lightside.media/$PACKAGE" 2>/dev/null \
               | node -e "try{const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d['dist-tags']?.latest||'')}catch{}" 2>/dev/null)
@@ -151,14 +149,6 @@ jobs:
           TAG_SHA: ${{ steps.source.outputs.tag_sha }}
           TAG_REF: ${{ steps.source.outputs.tag_ref }}
         run: |
-          if [ "${{ steps.meta.outputs.prerelease }}" != "true" ] && [ -f CHANGELOG.md ] \
-            && grep -q '^## \[Unreleased\]' CHANGELOG.md; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            DATE=$(date -u +%Y-%m-%d)
-            sed -i "s/## \[Unreleased\]/## [$VERSION] - $DATE/" CHANGELOG.md
-            git add CHANGELOG.md
-          fi
-
           git add package.json
           if git diff --cached --quiet; then
             echo "The release commit already contains the published version."

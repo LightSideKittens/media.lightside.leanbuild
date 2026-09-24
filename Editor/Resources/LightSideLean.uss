@@ -89,6 +89,10 @@
     min-width: 0;
 }
 
+.lean__clip {
+    overflow: hidden;
+}
+
 .lean__chevron {
     position: relative;
     width: 12px;

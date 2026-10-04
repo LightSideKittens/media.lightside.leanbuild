@@ -172,6 +172,10 @@ archives are read unchanged.
 
 Unity 2022.3 or newer. Developed and measured on 6000.6.
 
+## Support
+
+Bugs and feature requests go to [LightSide Ecosystem issues](https://github.com/LightSideKittens/LightSideEcosystem/issues/new/choose). Questions and discussion live on [Discord](https://discord.gg/ynRHp3wRmb).
+
 ## Licence
 
 MIT. See [LICENSE.md](LICENSE.md).

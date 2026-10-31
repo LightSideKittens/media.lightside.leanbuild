@@ -378,7 +378,7 @@ namespace LightSide.Lean
 
         /// <summary>A fold marker drawn the LightSide way: two accent strokes, turned by the stylesheet.</summary>
         /// <remarks>Two strokes rather than one of the triangles a font carries, because those are sized
-        /// and placed by the editor font's own metrics — different on every platform, and centred on a
+        /// and placed by the editor font's own metrics — different on every platform, and centered on a
         /// text baseline rather than on the row.</remarks>
         private static VisualElement Chevron()
         {

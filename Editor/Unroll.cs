@@ -23,7 +23,7 @@ namespace LightSide.Lean
     /// <para>
     /// 120 ms and quadratic out are the motion the rest of the LightSide editor uses, and LightSide Core
     /// owns that vocabulary. It is spelled again here because this package is installed on its own, by
-    /// people who hold no LightSide licence: depending on Core would put an access token in front of a
+    /// people who hold no LightSide license: depending on Core would put an access token in front of a
     /// package that promises to need none, and would pull Burst, Collections and Mathematics into a
     /// project this package exists to make smaller. Keep the two in step by hand.
     /// </para>

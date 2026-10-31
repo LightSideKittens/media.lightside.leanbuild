@@ -55,6 +55,21 @@ its line. Turn it on, build, and the failures are your list of work.
 The Editor's own assemblies are already compiled by the time this happens, so they are never
 affected, and the exclusion is lifted whichever way the build ends.
 
+### LightSide packages
+
+LightSide packages gate their UI Toolkit code behind one scripting define, `LIGHTSIDE_NO_UITOOLKIT`, so none of it
+shows up in the list of build errors. Lean owns the define: turning **Strip UI Toolkit** on adds it to every build
+target's Scripting Define Symbols, turning it off removes it, and a project opened with the setting on gets it
+wherever it is missing. Your other defines are left alone, and with the setting off an opened project is not touched,
+so a define you set by hand keeps working.
+
+With it set, Core's UI Toolkit input conversion and debug drawing, MoveIt's `VisualElement` properties, the UniText
+inspection overlay and UniText's Scene view overlay compile out of every assembly. The define sits in Player Settings
+because the build compiles runtime assemblies three times (editor, code generation, player) and only a Player
+Settings define reaches all three; it therefore also applies to the Editor's own compile of those assemblies, so the
+features above are unavailable in the Editor while the setting is on (UniText keeps its Respect Scene Visibility
+toggle). Changing the setting recompiles the project once.
+
 ### What it costs you
 
 Players stop supporting UI Toolkit. Code that uses it no longer compiles, which is the point — but

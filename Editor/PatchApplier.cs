@@ -1,7 +1,5 @@
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -53,9 +51,10 @@ namespace LightSide.Lean
         public void OnPreprocessBuild(BuildReport report)
         {
             Restore();
+            if (Directory.Exists(BackupDirectory)) Directory.Delete(BackupDirectory, true);
             PermanentPatches.Apply();
+            EditorApplication.delayCall += Restore;
 
-            var record = new StringBuilder();
             var applied = 0;
             foreach (var stored in PatchStore.Build.Read())
             {
@@ -68,23 +67,16 @@ namespace LightSide.Lean
                 if (stored.Concern != null)
                     Debug.LogWarning($"[Lean] Patch '{name}': {stored.Concern}");
 
-                var backup = Path.Combine(BackupDirectory, stored.Patch.Package);
-                var replaced = new List<string>();
-                var added = new List<string>();
-                stored.Patch.Apply(stored.Target.resolvedPath, backup, replaced, added);
-
-                foreach (var relative in replaced) record.AppendLine($"R\t{stored.Patch.Package}\t{relative}");
-                foreach (var relative in added) record.AppendLine($"A\t{stored.Patch.Package}\t{relative}");
-                Write(record.ToString());
+                var package = stored.Patch.Package;
+                stored.Patch.Apply(stored.Target.resolvedPath, Path.Combine(BackupDirectory, package),
+                    (replaced, relative) => Record($"{(replaced ? 'R' : 'A')}\t{package}\t{relative}"));
 
                 applied++;
                 Debug.Log($"[Lean] Patched {stored.Patch.Package}@{stored.Target.version} for this build: " +
                           string.Join(", ", stored.Patch.Entries));
             }
 
-            if (applied == 0) return;
-            EditorApplication.delayCall += Restore;
-            Debug.Log($"[Lean] {applied} patch(es) applied for this build.");
+            if (applied > 0) Debug.Log($"[Lean] {applied} patch(es) applied for this build.");
         }
 
         /// <inheritdoc/>
@@ -99,7 +91,7 @@ namespace LightSide.Lean
 
             var packages = PackageInfo.GetAllRegisteredPackages().ToDictionary(package => package.name);
             var restored = 0;
-            foreach (var line in File.ReadAllLines(PendingFile))
+            foreach (var line in File.ReadAllLines(PendingFile).Reverse())
             {
                 var parts = line.Split('\t');
                 if (parts.Length != 3 || !packages.TryGetValue(parts[1], out var package)) continue;
@@ -118,15 +110,15 @@ namespace LightSide.Lean
                 restored++;
             }
 
-            File.Delete(PendingFile);
             if (Directory.Exists(BackupDirectory)) Directory.Delete(BackupDirectory, true);
+            File.Delete(PendingFile);
             if (restored > 0) Debug.Log($"[Lean] Put back {restored} patched file(s).");
         }
 
-        private static void Write(string record)
+        private static void Record(string line)
         {
             Directory.CreateDirectory(LeanPaths.Work);
-            File.WriteAllText(PendingFile, record);
+            File.AppendAllText(PendingFile, line + "\n");
         }
     }
 

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEditor;
@@ -39,8 +38,6 @@ namespace LightSide.Lean
         /// </summary>
         private const int MaxStepMs = 34;
 
-        private const string ClipClass = "lean__clip";
-
         private static readonly Dictionary<VisualElement, Motion> motions = new();
         private static MethodInfo validateLayout;
         private static bool bound;
@@ -52,7 +49,6 @@ namespace LightSide.Lean
         /// </summary>
         internal static void Set(VisualElement body, bool expanded, bool animate)
         {
-            body.AddToClassList(ClipClass);
             var hasMotion = motions.TryGetValue(body, out var running);
             var current = hasMotion ? running.Expanding : body.style.display.value != DisplayStyle.None;
             if (current == expanded) return;
@@ -167,8 +163,6 @@ namespace LightSide.Lean
 
             private void Step()
             {
-                if (!motions.TryGetValue(body, out var current) || current != this) return;
-
                 var now = EditorApplication.timeSinceStartup;
                 var delta = Mathf.Min((float)((now - last) * 1000.0), MaxStepMs);
                 last = now;

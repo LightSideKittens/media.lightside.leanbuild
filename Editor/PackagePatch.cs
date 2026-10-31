@@ -104,14 +104,13 @@ namespace LightSide.Lean
         /// Writes the archive's files into <paramref name="root"/> and returns how many it wrote.
         /// </summary>
         /// <remarks>
-        /// What an undo needs is gathered only when it is asked for: each original that is overwritten is
-        /// copied into <paramref name="backup"/> under the same relative path and named in
-        /// <paramref name="replaced"/>, and files the package did not have are named in
-        /// <paramref name="added"/> so they can be deleted again. A patch that is never taken off passes
-        /// none of the three, and what it replaces is gone.
+        /// What an undo needs is gathered only when it is asked for: each file is reported to
+        /// <paramref name="touching"/> — replaced or added, with its relative path — before it is written,
+        /// and each original that is overwritten is copied into <paramref name="backup"/> under the same
+        /// relative path unless a copy is already there, so the first original survives later patches of
+        /// the same file. A patch that is never taken off passes neither, and what it replaces is gone.
         /// </remarks>
-        internal int Apply(string root, string backup = null, ICollection<string> replaced = null,
-            ICollection<string> added = null)
+        internal int Apply(string root, string backup = null, Action<bool, string> touching = null)
         {
             var written = 0;
             using var archive = ZipFile.OpenRead(Path);
@@ -123,17 +122,17 @@ namespace LightSide.Lean
                 var destination = System.IO.Path.Combine(root, relative);
                 Directory.CreateDirectory(System.IO.Path.GetDirectoryName(destination)!);
 
-                if (File.Exists(destination))
+                var replaces = File.Exists(destination);
+                touching?.Invoke(replaces, relative);
+                if (replaces && backup != null)
                 {
-                    if (backup != null)
+                    var saved = System.IO.Path.Combine(backup, relative);
+                    if (!File.Exists(saved))
                     {
-                        var saved = System.IO.Path.Combine(backup, relative);
                         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(saved)!);
-                        File.Copy(destination, saved, true);
+                        File.Copy(destination, saved);
                     }
-                    replaced?.Add(relative);
                 }
-                else added?.Add(relative);
 
                 entry.ExtractToFile(destination, true);
                 written++;

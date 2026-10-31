@@ -89,7 +89,7 @@
     min-width: 0;
 }
 
-.lean__clip {
+.lean__content {
     overflow: hidden;
 }
 

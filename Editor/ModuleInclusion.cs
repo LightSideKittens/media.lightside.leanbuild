@@ -60,26 +60,11 @@ namespace LightSide.Lean
             Strippable != null && (bool)Strippable.Invoke(null, new object[] { module });
 
         /// <summary>Current inclusion setting of <paramref name="module"/>, by its engine module name.</summary>
-        /// <exception cref="NotSupportedException">This editor version does not expose the setting.</exception>
-        internal static ModuleInclusionState Get(string module)
-        {
-            Require();
-            return (ModuleInclusionState)(int)Getter.Invoke(null, new object[] { module });
-        }
+        internal static ModuleInclusionState Get(string module) =>
+            (ModuleInclusionState)(int)Getter.Invoke(null, new object[] { module });
 
         /// <summary>Writes the inclusion setting of <paramref name="module"/> for this editor session.</summary>
-        /// <exception cref="NotSupportedException">This editor version does not expose the setting.</exception>
-        internal static void Set(string module, ModuleInclusionState state)
-        {
-            Require();
+        internal static void Set(string module, ModuleInclusionState state) =>
             Setter.Invoke(null, new[] { module, Enum.ToObject(Setting, (int)state) });
-        }
-
-        private static void Require()
-        {
-            if (!Supported)
-                throw new NotSupportedException(
-                    $"{MetadataType} / {SettingType} are not reachable in {UnityEngine.Application.unityVersion}.");
-        }
     }
 }

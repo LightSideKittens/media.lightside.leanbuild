@@ -19,17 +19,20 @@ namespace LightSide.Lean
     /// <remarks>
     /// <para>
     /// UnityLinker takes its roots from the link XML that
-    /// <c>UnityEditorInternal.AssemblyStripper.GetLinkXmlFiles</c> writes into
-    /// <c>Library/Bee/artifacts/UnityLinkerInputs</c>, and the type lists behind those files come from
-    /// the editor's own <c>RuntimeClassRegistry</c> — an editor always has UI Toolkit, so
-    /// <c>PanelSettings</c> and <c>DynamicAtlasSettings</c> are rooted even in a player that cannot use
-    /// them. The two roots keep <c>UnityEngine.UIElementsModule</c>, <c>UnityEngine.PropertiesModule</c>
-    /// and <c>UnityEngine.InputForUIModule</c> whole and pull members out of a dozen more assemblies.
+    /// <c>UnityEditorInternal.AssemblyStripper.GetLinkXmlFiles</c> writes — into
+    /// <c>Library/Bee/artifacts/UnityLinkerInputs</c> on Unity 6, into the folder it passes as
+    /// <see cref="UnityLinkerBuildPipelineData"/>'s input directory on 2022.3 — and the type lists behind
+    /// those files come from the editor's <c>RuntimeClassRegistry</c>, which names every type the build's
+    /// content instances. A UI Toolkit asset the build carries, such as a <c>PanelSettings</c> in a
+    /// <c>Resources</c> folder, therefore roots <c>PanelSettings</c> and <c>DynamicAtlasSettings</c> in a
+    /// player that never draws with them, and those two roots keep <c>UnityEngine.UIElementsModule</c>
+    /// whole and pull members out of a dozen more assemblies.
     /// </para>
     /// <para>
     /// The trim runs from <see cref="GenerateAdditionalLinkXmlFile"/> because that callback is the only
     /// public point between those files being written and UnityLinker reading them. An editor that
-    /// reorders the two loses the saving and builds normally; it never produces a broken player.
+    /// reorders the two, or writes the files somewhere else, keeps the module, and
+    /// <see cref="OnPostprocessBuild"/> says so.
     /// </para>
     /// <para>
     /// Cutting the roots only helps a player whose own code never reaches UI Toolkit; anything the linker
@@ -56,7 +59,13 @@ namespace LightSide.Lean
         /// <inheritdoc/>
         public string GenerateAdditionalLinkXmlFile(BuildReport report, UnityLinkerBuildPipelineData data)
         {
-            if (LeanSettings.StripUIToolkit) Trim();
+            if (LeanSettings.StripUIToolkit)
+            {
+#pragma warning disable CS0618
+                Trim(data.inputDirectory);
+#pragma warning restore CS0618
+                Trim(InputsDirectory);
+            }
             return WriteEmptyDocument();
         }
 
@@ -113,39 +122,42 @@ namespace LightSide.Lean
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// The player's managed assemblies decide wherever the report lists them: holding the module out of
+        /// the compilation removes the engine module by fiat, so the engine module list reads clean while
+        /// the linker still carries UI Toolkit's managed code.
+        /// </remarks>
         public void OnPostprocessBuild(BuildReport report)
         {
             RestoreInclusion();
             if (!LeanSettings.StripUIToolkit) return;
 
+            var assemblies = report.GetFiles()
+                .Select(file => Path.GetFileName(file.path))
+                .Where(name => name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
             var stripping = report.strippingInfo;
-            if (stripping == null)
+            var modules = stripping?.includedModules.ToArray() ?? Array.Empty<string>();
+            if (assemblies.Length == 0 && modules.Length == 0)
             {
-                Debug.LogWarning("[Lean] This build target does not report engine module stripping, " +
-                                 "so whether UI Toolkit left the player cannot be confirmed here.");
+                Debug.LogWarning("[Lean] This build reports neither its managed assemblies nor its engine " +
+                                 "modules, so whether UI Toolkit left the player cannot be confirmed here.");
                 return;
             }
 
-            var modules = stripping.includedModules.ToArray();
-            if (modules.Length == 0)
-            {
-                Debug.LogWarning("[Lean] This build reported no engine modules at all, so whether " +
-                                 "UI Toolkit left the player cannot be confirmed here.");
-                return;
-            }
-
+            var managed = assemblies.Contains(Module + ".dll", StringComparer.OrdinalIgnoreCase);
             var included = modules
                 .FirstOrDefault(module => module.StartsWith(EngineModule, StringComparison.OrdinalIgnoreCase));
-            if (included == null)
+            if (!managed && included == null)
             {
-                Debug.Log("[Lean] UI Toolkit's engine module is not in this player.");
+                Debug.Log("[Lean] UI Toolkit is not in this player.");
                 return;
             }
 
+            var kept = new[] { managed ? Module : null, included }.Where(name => name != null);
             var message = new StringBuilder()
-                .AppendLine("[Lean] UI Toolkit's engine module is still in this player.")
-                .AppendLine("The editor's roots were removed, but the linker reaches the module from the")
-                .AppendLine("player's own code, so nothing was saved.");
+                .AppendLine($"[Lean] UI Toolkit is still in this player: {string.Join(", ", kept)}.")
+                .AppendLine("The linker still reaches it, so nothing was saved.");
 
             var holders = UIToolkitHolders.Scan();
             message.AppendLine();
@@ -158,13 +170,13 @@ namespace LightSide.Lean
                         .Append("  ").Append(holder.Types).AppendLine(holder.Types == 1 ? " type" : " types");
             }
             else if (UIToolkitHolders.Supported)
-                message.AppendLine("No player assembly names a UI Toolkit type, so something outside the")
-                    .AppendLine("managed code keeps the module; read the build report's stripping section.");
+                message.AppendLine("No player script names a UI Toolkit type, so a link.xml, a precompiled")
+                    .AppendLine("plugin or a linker root this editor wrote where Lean does not look keeps it.");
             else
                 message.AppendLine("This editor does not expose the metadata reader needed to name the")
                     .AppendLine("assemblies responsible; read the build report's stripping section.");
 
-            AppendNativeChain(message, stripping, included);
+            if (included != null) AppendNativeChain(message, stripping, included);
             Debug.LogWarning(message.ToString().TrimEnd());
         }
 
@@ -194,11 +206,11 @@ namespace LightSide.Lean
             foreach (var reason in reasons) Walk(stripping, reason, seen, lines, depth + 1);
         }
 
-        private static void Trim()
+        private static void Trim(string directory)
         {
             foreach (var name in Inputs)
             {
-                var path = Path.Combine(InputsDirectory, name);
+                var path = Path.Combine(directory, name);
                 if (!File.Exists(path)) continue;
 
                 var document = XDocument.Load(path);

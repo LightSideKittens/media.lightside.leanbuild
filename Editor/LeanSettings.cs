@@ -27,6 +27,7 @@ namespace LightSide.Lean
                 if (Current.stripUIToolkit == value) return;
                 Current.stripUIToolkit = value;
                 Current.Save(true);
+                PackagesDefine.Apply(value);
             }
         }
 

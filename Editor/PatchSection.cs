@@ -216,10 +216,10 @@ namespace LightSide.Lean
             if (stored.Usable)
             {
                 header.Add(Action("↗", $"Open {patch.Package}'s folder in the file browser.",
-                    () => Reveal(patch.Package, "package.json", copy)));
+                    () => Reveal(stored, "package.json", copy)));
                 header.Add(Action("↺", $"Delete {patch.Package}'s files so Unity lays the package down " +
                                        $"again; {copy.Restores}",
-                    () => Restore(patch.Package)));
+                    () => Restore(stored.Target)));
             }
             header.Add(Remove($"Drop the whole patch for {patch.Package}", () =>
             {
@@ -245,7 +245,7 @@ namespace LightSide.Lean
 
                 var row = Row(file,
                     Action("↗", $"Show {relative} in the file browser.",
-                        () => Reveal(patch.Package, relative, copy)),
+                        () => Reveal(stored, relative, copy)),
                     Remove($"Stop patching {relative}", () =>
                     {
                         if (!Confirm($"Stop patching {relative}?\n\nThis drops your edited copy of the file" +
@@ -270,7 +270,7 @@ namespace LightSide.Lean
         /// when its build ended, so there is nothing of it left to undo.</remarks>
         private static void Dropped(StoredPatch stored, PatchStore store, Action changed)
         {
-            if (store == PatchStore.Permanent && stored.Target != null) Restore(stored.Patch.Package);
+            if (store == PatchStore.Permanent && stored.Target != null) Restore(stored.Target);
             changed();
         }
 
@@ -313,8 +313,8 @@ namespace LightSide.Lean
             {
                 var packages = store.Read()
                     .Where(stored => stored.Usable)
-                    .Select(stored => stored.Patch.Package)
-                    .Distinct()
+                    .GroupBy(stored => stored.Target.name)
+                    .Select(group => group.First().Target)
                     .ToArray();
                 if (packages.Length == 0)
                 {
@@ -333,20 +333,17 @@ namespace LightSide.Lean
             return button;
         }
 
-        private static void Restore(string package)
+        private static void Restore(PackageInfo package)
         {
-            var info = Installed(package);
-            if (info == null) return;
-
             try
             {
-                PermanentPatches.ExpectRestore(package);
-                PatchStore.RestorePackage(info);
-                Debug.Log($"[Lean] Deleted {package}'s files; Unity is laying the package down again.");
+                PermanentPatches.ExpectRestore(package.name);
+                PatchStore.RestorePackage(package);
+                Debug.Log($"[Lean] Deleted {package.name}'s files; Unity is laying the package down again.");
             }
             catch (Exception e) when (e is InvalidOperationException or IOException)
             {
-                Debug.LogWarning($"[Lean] Could not restore {package}: {e.Message}");
+                Debug.LogWarning($"[Lean] Could not restore {package.name}: {e.Message}");
             }
         }
 
@@ -354,26 +351,22 @@ namespace LightSide.Lean
         /// <remarks>Windows and macOS reveal a folder by selecting it in its parent instead of opening it,
         /// so a file inside is always what gets pointed at — the manifest every registered package carries,
         /// when the package as a whole is meant.</remarks>
-        private static void Reveal(string package, string relative, Copy copy)
+        private static void Reveal(StoredPatch stored, string relative, Copy copy)
         {
-            var info = Installed(package);
-            if (info == null) return;
+            var package = stored.Patch.Package;
+            if (stored.Target == null)
+            {
+                Debug.LogWarning($"[Lean] '{package}' is not installed in this project.");
+                return;
+            }
 
-            var file = Path.Combine(info.resolvedPath, relative);
+            var file = Path.Combine(stored.Target.resolvedPath, relative);
             if (!File.Exists(file))
             {
                 Debug.LogWarning($"[Lean] '{relative}' is not in {package} right now — {copy.Absent}");
                 return;
             }
             EditorUtility.RevealInFinder(file);
-        }
-
-        private static PackageInfo Installed(string package)
-        {
-            var info = PackageInfo.GetAllRegisteredPackages()
-                .FirstOrDefault(candidate => candidate.name == package);
-            if (info == null) Debug.LogWarning($"[Lean] '{package}' is not installed in this project.");
-            return info;
         }
 
         private static Label Label(string text, string className)

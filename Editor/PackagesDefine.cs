@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using UnityEditor;
 using UnityEditor.Build;
 
@@ -14,19 +16,35 @@ namespace LightSide.Lean
     /// Player Settings define reaches all three passes. Turning the setting off removes it; opening a project
     /// with the setting on adds it where it is missing, so a checkout that arrives without it is repaired. With
     /// the setting off an opened project is left alone, so a define set by hand keeps working.
+    /// Targets come from the enum's named fields, not its values: <c>iOS</c> shares its value with the obsolete
+    /// <c>iPhone</c>, and that is the name <c>ToString</c> returns.
     /// </remarks>
     internal static class PackagesDefine
     {
         internal const string Symbol = "LIGHTSIDE_NO_UITOOLKIT";
 
-        private static readonly NamedBuildTarget[] Targets = Enum.GetValues(typeof(BuildTargetGroup))
-            .Cast<BuildTargetGroup>()
-            .Where(group => group != BuildTargetGroup.Unknown
-                            && typeof(BuildTargetGroup).GetField(group.ToString())
-                                .GetCustomAttributes(typeof(ObsoleteAttribute), false).Length == 0)
-            .Select(NamedBuildTarget.FromBuildTargetGroup)
-            .Distinct()
-            .ToArray();
+        private static readonly NamedBuildTarget[] Targets = ValidTargets().Distinct().ToArray();
+
+        private static IEnumerable<NamedBuildTarget> ValidTargets()
+        {
+            foreach (var field in typeof(BuildTargetGroup).GetFields(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (field.IsDefined(typeof(ObsoleteAttribute), false)) continue;
+                var group = (BuildTargetGroup)field.GetValue(null);
+                if (group == BuildTargetGroup.Unknown) continue;
+
+                NamedBuildTarget target;
+                try
+                {
+                    target = NamedBuildTarget.FromBuildTargetGroup(group);
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+                yield return target;
+            }
+        }
 
         [InitializeOnLoadMethod]
         private static void Reconcile()

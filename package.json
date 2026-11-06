@@ -1,6 +1,6 @@
 {
     "name": "media.lightside.lean",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "displayName": "LightSide Lean",
     "description": "Takes out of a Unity project what Unity will not let you take out, and patches whatever breaks. Unity keeps the UIElements runtime in builds that never draw with it, through uGUI's panel bridge, other packages' runtime code and UI Toolkit assets in a build's content. One project setting compiles out what packages gate behind their assembly definitions, cuts those roots and holds the engine module out of the player's compilation, so a build that would still carry UI Toolkit fails naming the files to fix rather than shipping it. Measured on an Android IL2CPP APK of a one-scene uGUI project at Minimal stripping: 3.05 MiB less on Unity 2022.3, 3.95 MiB less on Unity 6.6. Fixes to files inside other people's packages are kept as archives in the project and laid down again whenever Unity restores a package — for the length of a build, or permanently, in the Editor, in batch mode and on a build agent. No vendoring, no embedded copies, no lost package updates.",
     "unity": "2022.3",

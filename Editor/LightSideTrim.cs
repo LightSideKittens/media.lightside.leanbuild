@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Xml.Linq;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -10,14 +11,19 @@ using UnityEngine;
 namespace LightSide.Lean
 {
     /// <summary>
-    /// Strips LightSide's assemblies as Medium does in an IL2CPP player that stays on Minimal, while
+    /// Strips LightSide's assemblies as Medium does in an IL2CPP player that stays on Minimal or Low, while
     /// <see cref="LeanSettings.TrimLightSide"/> is on, and keeps every other compiled assembly whole.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// At Minimal an assembly a scene references ships whole, and no per-assembly linker action changes that: the
-    /// rule set decides. So the link runs under Medium's rule set, and each compiled assembly that is not trimmed
-    /// gets the copy action, which is what Minimal gives it. .NET and engine assemblies follow the rule set.
+    /// At Minimal and Low an assembly a scene references ships whole, and no per-assembly linker action changes that:
+    /// the rule set decides. So the link runs under Medium's rule set, and each compiled assembly that is not trimmed
+    /// gets the copy action, which is what Minimal gives it. A project assembly Low would strip therefore ships whole.
+    /// </para>
+    /// <para>
+    /// Medium's rule set also drops the preservation lists Unity applies to .NET at Minimal and Low, so the link reads
+    /// the lists an IL2CPP player uses from the running editor. A missing list fails the build, because the members it
+    /// protects would otherwise go missing only at run time. Engine assemblies follow Medium's rule set.
     /// </para>
     /// <para>
     /// The linker takes these arguments from <c>UNITYLINKER_ADDITIONAL_ARGS</c>, which Unity reads but does not
@@ -41,6 +47,13 @@ namespace LightSide.Lean
         private const string ArtifactsDirectory = BeeDirectory + "/artifacts";
         private const string StrippedDirectory = "ManagedStripped";
         private const string LastArguments = LeanPaths.Work + "/trim-arguments.txt";
+        private const string LinkXml = LeanPaths.Work + "/trim.link.xml";
+        private const string DescriptorDirectory = "il2cpp/LinkerDescriptors/Default";
+
+        private static readonly string[] Descriptors =
+        {
+            "mscorlib.xml", "System.xml", "System.Configuration.xml", "System.Net.xml", "45/mscorlib.xml", "45/System.xml"
+        };
 
         private static bool applied;
         private static string previous;
@@ -56,6 +69,7 @@ namespace LightSide.Lean
             ForgetGraphOnChange(arguments);
             if (arguments.Length == 0) return;
 
+            WriteLinkXml();
             previous = Environment.GetEnvironmentVariable(Variable);
             Environment.SetEnvironmentVariable(Variable, string.IsNullOrEmpty(previous)
                 ? arguments
@@ -76,7 +90,8 @@ namespace LightSide.Lean
             if (!LeanSettings.TrimLightSide) return string.Empty;
             var target = NamedBuildTarget.FromBuildTargetGroup(report.summary.platformGroup);
             if (PlayerSettings.GetScriptingBackend(target) != ScriptingImplementation.IL2CPP) return string.Empty;
-            if (PlayerSettings.GetManagedStrippingLevel(target) != ManagedStrippingLevel.Minimal) return string.Empty;
+            if (PlayerSettings.GetManagedStrippingLevel(target) is not (ManagedStrippingLevel.Minimal or ManagedStrippingLevel.Low))
+                return string.Empty;
 
             var kept = CompilationPipeline.GetAssemblies(AssembliesType.PlayerWithoutTestAssemblies)
                 .Select(assembly => assembly.name)
@@ -88,7 +103,27 @@ namespace LightSide.Lean
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(name => name, StringComparer.Ordinal)
                 .Select(name => "Copy," + name);
-            return RuleSet + " --additional-action=" + string.Join(",", kept);
+            return RuleSet + " --include-link-xml=" + LinkXml + " --additional-action=" + string.Join(",", kept);
+        }
+
+        private static void WriteLinkXml()
+        {
+            var linker = new XElement("linker");
+            foreach (var name in Descriptors)
+            {
+                var path = Path.Combine(EditorApplication.applicationContentsPath, DescriptorDirectory, name);
+                if (!File.Exists(path))
+                    throw new BuildFailedException(
+                        "[Lean] Trim LightSide Code keeps .NET members through Unity's preservation lists, and this " +
+                        $"editor has no '{path}'. Turn the setting off or update Lean.");
+
+                foreach (var assembly in XDocument.Load(path).Root.Elements("assembly"))
+                {
+                    assembly.SetAttributeValue("ignoreIfMissing", "1");
+                    linker.Add(assembly);
+                }
+            }
+            new XDocument(linker).Save(LinkXml);
         }
 
         private static void ForgetGraphOnChange(string arguments)

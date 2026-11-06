@@ -3,8 +3,8 @@
 Takes out of a Unity project what Unity will not let you take out, and patches whatever breaks.
 
 Three jobs, one page. **Strip UI Toolkit** removes the UIElements runtime from players that never draw
-with it. **Trim LightSide Code** strips LightSide's assemblies in a project that stays on Minimal.
-**Patches** keep your fixes to files inside other people's packages — the ones Unity
+with it. **Trim LightSide Code** strips LightSide's assemblies in a project that stays on Minimal or
+Low. **Patches** keep your fixes to files inside other people's packages — the ones Unity
 overwrites whenever it re-resolves — and lay them down again, either for the length of a build or
 permanently.
 
@@ -86,25 +86,31 @@ setting on only when you know your players do not use UI Toolkit.
 
 ## Trim LightSide Code
 
-At Minimal stripping, a player ships every LightSide assembly a scene references whole, including the features it
-never uses. A project usually stays on Minimal because of its own code: code reached only through reflection stops
-working at Medium. This setting separates the two. LightSide's assemblies, and the `Unity.Burst` assembly they bring,
-are stripped as Medium does, while every other compiled assembly stays whole.
+At Minimal and Low stripping, a player ships every LightSide assembly a scene references whole, including the features
+it never uses. A project usually stays on these levels because of its own code: code reached only through reflection
+stops working at Medium. This setting separates the two. LightSide's assemblies, and the `Unity.Burst` assembly they
+bring, are stripped as Medium does, while every other compiled assembly stays whole.
 
-Saved in an Android IL2CPP APK, ARM64, one-scene UniText project at Minimal: 3.46 MiB on Unity 2022.3, 3.14 MiB on
-Unity 6.6.
+Saved in an Android IL2CPP APK, ARM64, one-scene UniText project:
+
+| Managed stripping | Unity 2022.3 | Unity 6.6 |
+|---|---:|---:|
+| Minimal | TBD | TBD |
+| Low | TBD | TBD |
 
 Off by default, because its failures show only at run time. It is stored in the same
-`ProjectSettings/LightSideLean.asset` and applies to IL2CPP builds at Minimal only: Medium and High already strip this
-code, and Low is left alone.
+`ProjectSettings/LightSideLean.asset` and applies to IL2CPP builds at Minimal and Low: Medium and High already strip
+this code.
 
 ### What it costs you
 
 - A LightSide type a player meets only inside a plain AssetBundle, such as a modifier nothing else uses, is stripped
   unless a `link.xml` keeps it: the linker does not see what a separately built bundle holds. Addressables records
   the types of its own content by itself.
-- .NET and engine assemblies follow Medium's rules instead of Minimal's, so code reaching their members only through
-  reflection can need a `link.xml` too. Your own assemblies are not affected.
+- Engine assemblies follow Medium's rules instead of Minimal's and Low's, so code reaching their members only through
+  reflection can need a `link.xml` too. .NET assemblies keep Unity's preservation lists for Minimal and Low.
+- At Low, your own assemblies ship as at Minimal: an assembly Low would strip stays whole, which takes back part of
+  the saving.
 
 `<assembly fullname="LightSide.UniText" preserve="all"/>` keeps a whole assembly.
 
@@ -113,6 +119,9 @@ code, and Low is left alone.
 The linker takes the arguments from `UNITYLINKER_ADDITIONAL_ARGS`, an environment variable Unity reads and does not
 document. Lean sets it for the length of a build. An editor that stops reading it builds at full size, and the build
 ends with a warning saying LightSide's assemblies were not trimmed.
+
+The .NET preservation lists come from the running editor's `il2cpp/LinkerDescriptors/Default`. A build in an editor
+without them fails and names the missing file.
 
 Unity reads the variable only while generating the player's build graph, so the first build after the arguments change
 deletes that graph and takes longer. The arguments change when the setting moves or when the list of the project's

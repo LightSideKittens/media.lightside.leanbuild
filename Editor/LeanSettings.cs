@@ -32,7 +32,7 @@ namespace LightSide.Lean
             }
         }
 
-        /// <summary>Whether IL2CPP players at Minimal stripping drop the LightSide code they do not use.</summary>
+        /// <summary>Whether IL2CPP players at Minimal and Low stripping drop the LightSide code they do not use.</summary>
         internal static bool TrimLightSide
         {
             get => Current.trimLightSide;
@@ -119,20 +119,20 @@ namespace LightSide.Lean
 
             trimCard.Add(Text("Trim LightSide Code", "lean__title"));
             trimCard.Add(Text(
-                "At Minimal stripping a player ships every LightSide assembly a scene references whole. This " +
-                "strips them as Medium does and keeps every other compiled assembly whole, so your own code " +
-                "stays at Minimal. Applies to IL2CPP builds at Minimal; other levels are left alone.",
+                "At Minimal and Low stripping a player ships every LightSide assembly a scene references whole. " +
+                "This strips them as Medium does and keeps every other compiled assembly whole, so your own code " +
+                "ships as at Minimal. Applies to IL2CPP builds at Minimal and Low; Medium and High already strip " +
+                "this code.",
                 "lean__lead"));
 
             var trimNote = Text(
                 "A LightSide type a player meets only inside a plain AssetBundle, such as a modifier nothing " +
-                "else uses, needs a link.xml entry; Addressables records its own. .NET and engine assemblies " +
-                "also follow Medium's rules, so reflection into them can need one too. These failures show " +
-                "only at run time.",
+                "else uses, needs a link.xml entry; Addressables records its own. Engine assemblies also follow " +
+                "Medium's rules, so reflection into them can need one too. These failures show only at run time.",
                 "lean__note");
             trimNote.style.display = TrimLightSide ? DisplayStyle.Flex : DisplayStyle.None;
 
-            var trim = Checkbox("Trim LightSide assemblies at Minimal stripping");
+            var trim = Checkbox("Trim LightSide assemblies at Minimal and Low stripping");
             trim.value = TrimLightSide;
             trim.RegisterValueChangedCallback(changed =>
             {

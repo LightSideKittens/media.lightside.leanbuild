@@ -10,7 +10,7 @@ namespace LightSide.Lean
 {
     /// <summary>
     /// Lays the project's patches over their packages: <see cref="PatchStore.Permanent"/>'s for good, and
-    /// <see cref="PatchStore.Build"/>'s for the length of one build.
+    /// <see cref="PatchStore.Build"/>'s and <see cref="UIToolkitDefines"/>'s rewrites for the length of one build.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -77,10 +77,21 @@ namespace LightSide.Lean
             }
 
             if (applied > 0) Debug.Log($"[Lean] {applied} patch(es) applied for this build.");
+
+            if (LeanSettings.StripUIToolkit) UIToolkitDefines.Remove(Preserve);
         }
 
         /// <inheritdoc/>
         public void OnPostprocessBuild(BuildReport report) => Restore();
+
+        private static void Preserve(string package, string relative, string live)
+        {
+            Record($"R\t{package}\t{relative}");
+            var saved = Path.Combine(BackupDirectory, package, relative);
+            if (File.Exists(saved)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(saved)!);
+            File.Copy(live, saved);
+        }
 
         /// <summary>Puts every file a build patch replaced back the way the package had it.</summary>
         [MenuItem("Tools/LightSide/Lean/Undo this build's patches")]

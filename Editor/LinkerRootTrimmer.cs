@@ -36,11 +36,11 @@ namespace LightSide.Lean
     /// </para>
     /// <para>
     /// Cutting the roots only helps a player whose own code never reaches UI Toolkit; anything the linker
-    /// can still walk to it — an Input System UI module, a URP renderer feature, uGUI's own panel bridge —
-    /// keeps the module regardless. That is why the module is also held out of the player's compilation,
-    /// which turns each such reference into a compiler error rather than a build that quietly saves
-    /// nothing. Where an editor does not expose module inclusion that lever is unavailable, and
-    /// <see cref="OnPostprocessBuild"/> reports that the module stayed.
+    /// can still walk to it keeps the module regardless. <see cref="UIToolkitDefines"/> compiles out what a
+    /// package gates behind its assembly definition, such as uGUI's panel bridge, and the module is also held
+    /// out of the player's compilation, which turns every other reference into a compiler error rather than a
+    /// build that quietly saves nothing. Where an editor does not expose module inclusion that lever is
+    /// unavailable, and <see cref="OnPostprocessBuild"/> reports that the module stayed.
     /// </para>
     /// </remarks>
     internal sealed class LinkerRootTrimmer : IUnityLinkerProcessor, IPreprocessBuildWithReport,

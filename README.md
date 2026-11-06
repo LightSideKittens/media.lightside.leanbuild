@@ -2,8 +2,9 @@
 
 Takes out of a Unity project what Unity will not let you take out, and patches whatever breaks.
 
-Two jobs, one page. **Strip UI Toolkit** removes the UIElements runtime from players that never draw
-with it. **Patches** keep your fixes to files inside other people's packages — the ones Unity
+Three jobs, one page. **Strip UI Toolkit** removes the UIElements runtime from players that never draw
+with it. **Trim LightSide Code** strips LightSide's assemblies in a project that stays on Minimal.
+**Patches** keep your fixes to files inside other people's packages — the ones Unity
 overwrites whenever it re-resolves — and lay them down again, either for the length of a build or
 permanently.
 
@@ -13,21 +14,23 @@ permanently.
 
 ## Strip UI Toolkit
 
-Unity compiles the whole UIElements runtime into builds that cannot use it. Removing
-`com.unity.modules.uielements` or guarding every reference in your own code does not move it. This
-package cuts the roots Unity's editor seeds into the player's managed link, and holds the engine
-module out of the player's compilation so nothing can quietly put it back.
+Unity keeps the UIElements runtime in builds that never draw with it: uGUI's panel bridge reaches it
+from every uGUI project, other packages reach it from their own runtime code, and a UI Toolkit asset
+in a build's content adds it to the player's managed link roots. This package compiles out what
+packages gate behind their assembly definitions, cuts those roots, and holds the engine module out of
+the player's compilation so nothing can quietly put it back.
 
-Measured on an Android IL2CPP build, ARM64, managed stripping High:
+Saved in an Android IL2CPP APK, ARM64, one-scene uGUI project:
 
-| | before | after |
-|---|---|---|
-| `libil2cpp.so` | 38 602 560 | 25 008 216 |
-| `global-metadata.dat` | 5 561 794 | 3 584 102 |
-| resident memory | 237.02 MiB | 227.15 MiB |
+| Managed stripping | Unity 2022.3 | Unity 6.6 |
+|---|---:|---:|
+| Minimal | 3.05 MiB | 3.95 MiB |
+| High | 3.09 MiB | 0.03 MiB |
 
-Resident figures are the mean of five interleaved runs on one device, sampled nine seconds after
-launch.
+A project whose content carries a UI Toolkit asset saves more. One such project at High went from
+38 602 560 to 25 008 216 bytes of `libil2cpp.so`, from 5 561 794 to 3 584 102 bytes of
+`global-metadata.dat`, and from 237.02 to 227.15 MiB of resident memory, the mean of five interleaved
+runs on one device, sampled nine seconds after launch.
 
 Off by default. The setting lives in `ProjectSettings/LightSideLean.asset`. **Commit that file.** It
 is what a headless build reads, so a machine that checks out the project without it builds at full
@@ -40,17 +43,20 @@ The Editor is unaffected. The package stays installed, the manifest is untouched
 overlays and editor windows written against UIElements keep working — including those in packages you
 do not control.
 
-### The build fails first, and that is the design
+### What compiles out, and what fails the build
 
-Cutting the editor's roots only helps a player whose own code never reaches UI Toolkit, and several
-common packages reach it from runtime assemblies: **Input System** (its UI input module), **Universal
-RP** (its UI Toolkit renderer pass), **Localization**, and uGUI's `PanelEventHandler` and
-`PanelRaycaster`. While any of them is compiled in, the linker keeps the module and cutting roots
-saves nothing.
+Cutting roots only helps a player whose own code never reaches UI Toolkit. While any such code is
+compiled in, the linker keeps the module and cutting roots saves nothing.
 
-So the setting does not quietly settle for that. With it on, the engine module is held out of the
-player's compilation, and every player file that touches UI Toolkit becomes a compiler error naming
-its line. Turn it on, build, and the failures are your list of work.
+A package that gates that code behind a `versionDefines` entry on `com.unity.modules.uielements` needs
+nothing from you; uGUI's `PanelEventHandler` and `PanelRaycaster` are the case every uGUI project has.
+For the length of a build, Lean takes those entries out of the assembly definitions of installed
+packages and puts them back afterwards. `Embedded` and `Local` packages are left alone, because their
+source belongs to the project.
+
+Everything else fails the build rather than quietly saving nothing. The engine module is held out of
+the player's compilation, so every remaining player file that touches UI Toolkit becomes a compiler
+error naming its line. Turn the setting on, build, and any failures are your list of work.
 
 The Editor's own assemblies are already compiled by the time this happens, so they are never
 affected, and the exclusion is lifted whichever way the build ends.
@@ -78,6 +84,42 @@ setting on only when you know your players do not use UI Toolkit.
 
 ---
 
+## Trim LightSide Code
+
+At Minimal stripping, a player ships every LightSide assembly a scene references whole, including the features it
+never uses. A project usually stays on Minimal because of its own code: code reached only through reflection stops
+working at Medium. This setting separates the two. LightSide's assemblies, and the `Unity.Burst` assembly they bring,
+are stripped as Medium does, while every other compiled assembly stays whole.
+
+Saved in an Android IL2CPP APK, ARM64, one-scene UniText project at Minimal: 3.46 MiB on Unity 2022.3, 3.14 MiB on
+Unity 6.6.
+
+Off by default, because its failures show only at run time. It is stored in the same
+`ProjectSettings/LightSideLean.asset` and applies to IL2CPP builds at Minimal only: Medium and High already strip this
+code, and Low is left alone.
+
+### What it costs you
+
+- A LightSide type a player meets only inside a plain AssetBundle, such as a modifier nothing else uses, is stripped
+  unless a `link.xml` keeps it: the linker does not see what a separately built bundle holds. Addressables records
+  the types of its own content by itself.
+- .NET and engine assemblies follow Medium's rules instead of Minimal's, so code reaching their members only through
+  reflection can need a `link.xml` too. Your own assemblies are not affected.
+
+`<assembly fullname="LightSide.UniText" preserve="all"/>` keeps a whole assembly.
+
+### What it relies on
+
+The linker takes the arguments from `UNITYLINKER_ADDITIONAL_ARGS`, an environment variable Unity reads and does not
+document. Lean sets it for the length of a build. An editor that stops reading it builds at full size, and the build
+ends with a warning saying LightSide's assemblies were not trimmed.
+
+Unity reads the variable only while generating the player's build graph, so the first build after the arguments change
+deletes that graph and takes longer. The arguments change when the setting moves or when the list of the project's
+assemblies does.
+
+---
+
 ## Patches
 
 A fix to someone else's package lives inside a package folder, which Unity overwrites whenever it
@@ -102,9 +144,8 @@ Laid over their packages before a build compiles the player, and taken off after
 exact: the editor's own assemblies are already compiled and the player's are not, so the edit reaches
 the player and nothing else.
 
-This is what **Strip UI Toolkit** needs. Most of that work is one deleted line — a well-behaved
-package gates its UI Toolkit code behind a `versionDefines` entry in its `.asmdef`, and removing that
-entry drops the code from the player without touching a single source file.
+This is how a failure **Strip UI Toolkit** reports gets fixed inside a package with no gate of its
+own: guard the code where it lives, and keep the edit as a build patch.
 
 ### Permanent Patches — `ProjectSettings/LightSideLeanPermanentPatches`
 
@@ -159,8 +200,9 @@ the module left the player and what kept it.
 
 ## Why Unity keeps UI Toolkit
 
-`UnityEditorInternal.AssemblyStripper` writes the player's managed link roots from the editor's own
-`RuntimeClassRegistry`, and an editor always has UI Toolkit. Two types reach the root list that way —
+`UnityEditorInternal.AssemblyStripper` writes the player's managed link roots from the editor's
+`RuntimeClassRegistry`, which names every type the build's content instances. A UI Toolkit asset the
+build carries, such as a `PanelSettings` in a `Resources` folder, puts two types on the root list —
 `UnityEngine.UIElements.PanelSettings` and `UnityEngine.UIElements.DynamicAtlasSettings` — and from
 them UnityLinker keeps 1 471 types, three whole assemblies and members of a dozen more.
 

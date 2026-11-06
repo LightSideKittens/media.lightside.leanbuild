@@ -15,6 +15,7 @@ namespace LightSide.Lean
         private const string StyleSheetName = "LightSideLean";
 
         [SerializeField] private bool stripUIToolkit;
+        [SerializeField] private bool trimLightSide;
 
         private static StyleSheet styleSheet;
 
@@ -28,6 +29,18 @@ namespace LightSide.Lean
                 Current.stripUIToolkit = value;
                 Current.Save(true);
                 PackagesDefine.Apply(value);
+            }
+        }
+
+        /// <summary>Whether IL2CPP players at Minimal stripping drop the LightSide code they do not use.</summary>
+        internal static bool TrimLightSide
+        {
+            get => Current.trimLightSide;
+            set
+            {
+                if (Current.trimLightSide == value) return;
+                Current.trimLightSide = value;
+                Current.Save(true);
             }
         }
 
@@ -72,15 +85,16 @@ namespace LightSide.Lean
 
             card.Add(Text("Strip UI Toolkit", "lean__title"));
             card.Add(Text(
-                "Unity seeds its own editor's UI Toolkit types into every player's managed link roots, " +
-                "so the UIElements runtime is compiled into builds that cannot use it. Removing the " +
-                "package or guarding every reference does not take it out; cutting those roots and " +
-                "holding the module out of the player's compilation does.",
+                "Unity keeps the UIElements runtime in builds that never draw with it: uGUI's panel " +
+                "bridge and other packages reach it from their runtime code, and a UI Toolkit asset in " +
+                "a build's content roots it. This compiles out what packages gate behind their " +
+                "assembly definitions, cuts those roots and holds the module out of the player's " +
+                "compilation.",
                 "lean__lead"));
 
             var note = Text(
-                "Builds fail until no player code reaches UI Toolkit. The module is held out of the " +
-                "player's compilation, so every use of it becomes a compiler error naming its file and " +
+                "Code with no such gate fails the build. The module is held out of the player's " +
+                "compilation, so every remaining use of it becomes a compiler error naming its file and " +
                 "line — fix each where it lives, then drop the fixed files below to keep the fix. The " +
                 "Editor is unaffected.\n\n" +
                 "Once a build passes, players no longer run UI Toolkit. Anything that needs it at run " +
@@ -98,6 +112,35 @@ namespace LightSide.Lean
             });
             card.Add(strip);
             card.Add(note);
+
+            var trimCard = new VisualElement();
+            trimCard.AddToClassList("lean__card");
+            page.Add(trimCard);
+
+            trimCard.Add(Text("Trim LightSide Code", "lean__title"));
+            trimCard.Add(Text(
+                "At Minimal stripping a player ships every LightSide assembly a scene references whole. This " +
+                "strips them as Medium does and keeps every other compiled assembly whole, so your own code " +
+                "stays at Minimal. Applies to IL2CPP builds at Minimal; other levels are left alone.",
+                "lean__lead"));
+
+            var trimNote = Text(
+                "A LightSide type a player meets only inside a plain AssetBundle, such as a modifier nothing " +
+                "else uses, needs a link.xml entry; Addressables records its own. .NET and engine assemblies " +
+                "also follow Medium's rules, so reflection into them can need one too. These failures show " +
+                "only at run time.",
+                "lean__note");
+            trimNote.style.display = TrimLightSide ? DisplayStyle.Flex : DisplayStyle.None;
+
+            var trim = Checkbox("Trim LightSide assemblies at Minimal stripping");
+            trim.value = TrimLightSide;
+            trim.RegisterValueChangedCallback(changed =>
+            {
+                TrimLightSide = changed.newValue;
+                trimNote.style.display = changed.newValue ? DisplayStyle.Flex : DisplayStyle.None;
+            });
+            trimCard.Add(trim);
+            trimCard.Add(trimNote);
 
             PatchSection.Build(page, PatchStore.Build);
             PatchSection.Build(page, PatchStore.Permanent);

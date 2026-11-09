@@ -120,9 +120,9 @@ namespace LightSide.Lean
             trimCard.Add(Text("Trim LightSide Code", "lean__title"));
             trimCard.Add(Text(
                 "At Minimal and Low stripping a player ships every LightSide assembly a scene references whole. " +
-                "This strips them as Medium does and keeps every other compiled assembly whole, so your own code " +
-                "ships as at Minimal. Applies to IL2CPP builds at Minimal and Low; Medium and High already strip " +
-                "this code.",
+                "This strips them as Medium does and leaves every other compiled assembly as your level does, so " +
+                "your own code ships as before. Applies to IL2CPP builds at Minimal and Low; Medium and High " +
+                "already strip this code.",
                 "lean__lead"));
 
             var trimNote = Text(

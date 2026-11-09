@@ -48,7 +48,7 @@ namespace LightSide.Lean
     {
         private const string Module = "UnityEngine.UIElementsModule";
         private const string EngineModule = "UIElements";
-        private const string InputsDirectory = "Library/Bee/artifacts/UnityLinkerInputs";
+        internal const string InputsDirectory = "Library/Bee/artifacts/UnityLinkerInputs";
         private const string OwnFile = "Lean.link.xml";
 
         private static readonly string[] Inputs = { "TypesInScenes.xml", "SerializedTypes.xml" };

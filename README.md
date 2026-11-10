@@ -89,13 +89,14 @@ setting on only when you know your players do not use UI Toolkit.
 At Minimal and Low stripping, a player ships every LightSide assembly a scene references whole, including the features
 it never uses. A project usually stays on these levels because of its own code: code reached only through reflection
 stops working at Medium. This setting separates the two. LightSide's assemblies, and the `Unity.Burst` assembly they
-bring, are stripped as Medium does, while every other compiled assembly ships as your level ships it.
+bring, are stripped as Medium does, while every other assembly ships as your level ships it: your own, other packages',
+the engine's and .NET's, including an assembly a build script adds with a define it sets only for the build.
 
 Saved in an Android IL2CPP APK, ARM64, one-scene UniText project:
 
 | Managed stripping | Unity 2022.3 | Unity 6.6 |
 |---|---:|---:|
-| Minimal | 3.33 MiB | 2.99 MiB |
+| Minimal | 3.33 MiB | 2.96 MiB |
 | Low | 3.09 MiB | 2.96 MiB |
 
 Off by default, because its failures show only at run time. It is stored in the same
@@ -104,14 +105,9 @@ this code.
 
 ### What it costs you
 
-- A LightSide type a player meets only inside a plain AssetBundle, such as a modifier nothing else uses, is stripped
-  unless a `link.xml` keeps it: the linker does not see what a separately built bundle holds. Addressables records
-  the types of its own content by itself.
-- Engine assemblies follow Medium's rules instead of Minimal's and Low's, so code reaching their members only through
-  reflection can need a `link.xml` too. .NET assemblies keep Unity's preservation lists for Minimal and Low, and your
-  own assemblies are not affected.
-
-`<assembly fullname="LightSide.UniText" preserve="all"/>` keeps a whole assembly.
+A LightSide type a player meets only inside a plain AssetBundle, such as a modifier nothing else uses, is stripped unless
+a `link.xml` keeps it: the linker does not see what a separately built bundle holds. Addressables records the types of
+its own content by itself. `<assembly fullname="LightSide.UniText" preserve="all"/>` keeps a whole assembly.
 
 ### What it relies on
 
@@ -119,13 +115,13 @@ The linker takes the arguments from `UNITYLINKER_ADDITIONAL_ARGS`, an environmen
 document. Lean sets it for the length of a build. An editor that stops reading it builds at full size, and the build
 ends with a warning saying LightSide's assemblies were not trimmed.
 
-The .NET preservation lists come from the running editor's `il2cpp/LinkerDescriptors/Default`. At Low, the assemblies
-to keep whole come from the `TypesInScenes.xml` Unity writes during a build. A build in an editor without these files
-fails and names what is missing.
+The .NET preservation lists come from the running editor's `il2cpp/LinkerDescriptors/Default`, and the assemblies your
+scenes use from the `TypesInScenes.xml` Unity writes during a build. A build in an editor without these files fails and
+names what is missing.
 
 Unity reads the variable only while generating the player's build graph, so the first build after the arguments change
 deletes that graph and takes longer. The arguments change when the setting or the stripping level moves, and at Minimal
-when the list of the project's assemblies does.
+when the engine's modules or LightSide's assemblies do.
 
 ---
 

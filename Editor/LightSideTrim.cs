@@ -8,31 +8,39 @@ using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.Compilation;
 using UnityEditor.UnityLinker;
+using UnityEditorInternal;
 using UnityEngine;
 
 namespace LightSide.Lean
 {
     /// <summary>
     /// Strips LightSide's assemblies as Medium does in an IL2CPP player that stays on Minimal or Low, while
-    /// <see cref="LeanSettings.TrimLightSide"/> is on, and leaves every other compiled assembly as that level does.
+    /// <see cref="LeanSettings.TrimLightSide"/> is on, and leaves every other assembly as that level does.
     /// </summary>
     /// <remarks>
     /// <para>
     /// At Minimal and Low an assembly a scene references ships whole, and no per-assembly linker action changes that:
-    /// the rule set decides. So the link runs under Medium's rule set, and the other assemblies get back what their
-    /// level gives them. At Minimal that is the copy action for each of them.
+    /// the rule set decides. So the link runs under Medium's rule set, and a link XML gives every other assembly back
+    /// what its level gives it.
     /// </para>
     /// <para>
-    /// At Low it is whole for the assemblies Unity passes as roots and Medium's treatment for the rest, which Low
-    /// shares. The roots are the compiled assemblies not defined under <c>Packages</c>, and the assemblies named in
-    /// <c>TypesInScenes.xml</c>, which exists only once the build has collected its scenes. So
-    /// <see cref="GenerateAdditionalLinkXmlFile"/> adds them to the link XML, and a build without that file fails.
+    /// Both levels keep their roots whole: the compiled assemblies not defined under <c>Packages</c>, and the ones
+    /// named in <c>TypesInScenes.xml</c>, which exists only once the build has collected its scenes, so
+    /// <see cref="GenerateAdditionalLinkXmlFile"/> adds those and a build without that file fails. The project's
+    /// assemblies come from its assembly definitions and plugins, not from the editor's compilation, which leaves out
+    /// an assembly whose define a build script sets only for the build; the linker ignores a name it does not load.
+    /// Minimal also copies every other assembly the linker loads that is neither .NET, an engine module nor the
+    /// <c>UnityEngine</c> facade, so there the link copies by default and links the engine modules, recognized by their
+    /// assembly attribute as the linker recognizes them, the facade and LightSide's assemblies. The linker links
+    /// every engine assembly the facade references, so the engine's other assemblies are kept whole at Minimal.
     /// </para>
     /// <para>
-    /// Medium's rule set also drops the preservation lists Unity applies to .NET at Minimal and Low, so the link reads
-    /// the lists an IL2CPP player uses from the running editor's il2cpp folder, which macOS editors keep under
-    /// <c>Contents/Resources/Scripting</c> from Unity 6.3. A missing list fails the build, because the members it
-    /// protects would otherwise go missing only at run time. Engine assemblies follow Medium's rule set.
+    /// Medium's rule set keeps only the methods with a body of each MonoBehaviour, its subclasses and the subclasses of
+    /// ScriptableObject it keeps, and Minimal and Low keep them all, so the link XML keeps every method of such a type
+    /// whenever the linker keeps the type. Medium's rule set also drops the preservation lists Unity applies to .NET at
+    /// Minimal and Low, so the link reads the lists an IL2CPP player uses from the running editor's il2cpp folder,
+    /// which macOS editors keep under <c>Contents/Resources/Scripting</c> from Unity 6.3. A missing list fails the
+    /// build, because the members it protects would otherwise go missing only at run time.
     /// </para>
     /// <para>
     /// The linker takes these arguments from <c>UNITYLINKER_ADDITIONAL_ARGS</c>, which Unity reads but does not
@@ -41,15 +49,19 @@ namespace LightSide.Lean
     /// <para>
     /// Unity reads the variable only while generating the player's build graph, and nothing tells it to generate
     /// the graph again when the variable changes. So a change of arguments deletes the graph, whichever way the
-    /// setting moved; only that build pays for it.
+    /// setting or the level moved; only that build pays for it.
     /// </para>
     /// </remarks>
     internal sealed class LightSideTrim : IPreprocessBuildWithReport, IPostprocessBuildWithReport, IUnityLinkerProcessor
     {
         private const string Variable = "UNITYLINKER_ADDITIONAL_ARGS";
-        private const string RuleSet = "--rule-set=Aggressive";
+        private const string RuleSet = "--rule-set=Aggressive --include-link-xml=" + LinkXml;
+        private const string CopyOthers = " --user-action=copy --additional-action=";
         private const string Prefix = "LightSide.";
         private const string Dependency = "Unity.Burst";
+        private const string EditorPrefix = "UnityEditor";
+        private const string EngineFacade = "UnityEngine";
+        private const string EngineModuleAttribute = "UnityEngine.UnityEngineModuleAssembly";
         private const string BeeDirectory = "Library/Bee";
         private const string GraphFiles = "Player*.dag*";
         private const string SourceDirectory = BeeDirectory + "/PlayerScriptAssemblies";
@@ -70,6 +82,12 @@ namespace LightSide.Lean
         private static bool applied;
         private static string previous;
 
+        [Serializable]
+        private struct Definition
+        {
+            public string name;
+        }
+
         /// <inheritdoc/>
         public int callbackOrder => 0;
 
@@ -77,11 +95,12 @@ namespace LightSide.Lean
         public void OnPreprocessBuild(BuildReport report)
         {
             Restore();
-            var arguments = Arguments(report);
+            var level = TrimmedLevel(NamedBuildTarget.FromBuildTargetGroup(report.summary.platformGroup));
+            var arguments = Arguments(level);
             ForgetGraphOnChange(arguments);
-            if (arguments.Length == 0) return;
+            if (level == null) return;
 
-            WriteLinkXml();
+            WriteLinkXml(level.Value);
             previous = Environment.GetEnvironmentVariable(Variable);
             Environment.SetEnvironmentVariable(Variable, string.IsNullOrEmpty(previous)
                 ? arguments
@@ -100,41 +119,57 @@ namespace LightSide.Lean
         /// <inheritdoc/>
         public string GenerateAdditionalLinkXmlFile(BuildReport report, UnityLinkerBuildPipelineData data)
         {
-            var target = NamedBuildTarget.FromBuildTargetGroup(BuildPipeline.GetBuildTargetGroup(data.target));
-            if (!applied || PlayerSettings.GetManagedStrippingLevel(target) != ManagedStrippingLevel.Low) return null;
+            if (!applied) return null;
 
             var document = XDocument.Load(LinkXml);
-            foreach (var name in RootsAtLow(data))
-                document.Root.Add(new XElement("assembly", new XAttribute("fullname", name),
-                    new XAttribute("preserve", "all"), new XAttribute("ignoreIfMissing", "1")));
+            foreach (var name in UsedInScenes(data)) document.Root.Add(Whole(name));
             document.Save(LinkXml);
             return null;
         }
 
-        private static string Arguments(BuildReport report)
+        private static ManagedStrippingLevel? TrimmedLevel(NamedBuildTarget target)
         {
-            if (!LeanSettings.TrimLightSide) return string.Empty;
-            var target = NamedBuildTarget.FromBuildTargetGroup(report.summary.platformGroup);
-            if (PlayerSettings.GetScriptingBackend(target) != ScriptingImplementation.IL2CPP) return string.Empty;
+            if (!LeanSettings.TrimLightSide) return null;
+            if (PlayerSettings.GetScriptingBackend(target) != ScriptingImplementation.IL2CPP) return null;
+            var level = PlayerSettings.GetManagedStrippingLevel(target);
+            return level is ManagedStrippingLevel.Minimal or ManagedStrippingLevel.Low ? level : null;
+        }
 
-            var arguments = RuleSet + " --include-link-xml=" + LinkXml;
-            switch (PlayerSettings.GetManagedStrippingLevel(target))
+        private static string Arguments(ManagedStrippingLevel? level)
+        {
+            switch (level)
             {
                 case ManagedStrippingLevel.Low:
-                    return arguments;
+                    return RuleSet;
                 case ManagedStrippingLevel.Minimal:
-                    var kept = Compiled().Concat(Precompiled())
-                        .Where(IsKept)
+                    var linked = EngineAssemblies().Where(engine => engine.Value).Select(engine => engine.Key)
+                        .Concat(ProjectAssemblies().Keys.Where(name => !IsKept(name)))
                         .Distinct(StringComparer.Ordinal)
                         .OrderBy(name => name, StringComparer.Ordinal)
-                        .Select(name => "Copy," + name);
-                    return arguments + " --additional-action=" + string.Join(",", kept);
+                        .Select(name => "Link," + name);
+                    return RuleSet + CopyOthers + string.Join(",", linked);
                 default:
                     return string.Empty;
             }
         }
 
-        private static IEnumerable<string> RootsAtLow(UnityLinkerBuildPipelineData data)
+        private static Dictionary<string, bool> EngineAssemblies()
+        {
+            var loaded = AppDomain.CurrentDomain.GetAssemblies()
+                .Where(assembly => !assembly.IsDynamic)
+                .ToLookup(assembly => assembly.GetName().Name, StringComparer.Ordinal);
+            return CompilationPipeline.GetPrecompiledAssemblyPaths(CompilationPipeline.PrecompiledAssemblySources.UnityEngine)
+                .Select(Path.GetFileNameWithoutExtension)
+                .Where(name => !name.StartsWith(EditorPrefix, StringComparison.Ordinal))
+                .Distinct(StringComparer.Ordinal)
+                .ToDictionary(name => name, name => name == EngineFacade || loaded[name].Any(IsEngineModule),
+                    StringComparer.Ordinal);
+        }
+
+        private static bool IsEngineModule(System.Reflection.Assembly assembly) =>
+            assembly.CustomAttributes.Any(attribute => attribute.AttributeType.FullName == EngineModuleAttribute);
+
+        private static IEnumerable<string> UsedInScenes(UnityLinkerBuildPipelineData data)
         {
 #pragma warning disable CS0618
             var directories = new[] { data.inputDirectory, LinkerRootTrimmer.InputsDirectory };
@@ -148,25 +183,40 @@ namespace LightSide.Lean
             var inScenes = XDocument.Load(file).Root.Elements("assembly")
                 .Select(assembly => (string)assembly.Attribute("fullname"))
                 .ToHashSet(StringComparer.Ordinal);
-            return Compiled()
-                .Where(name => CompilationPipeline.GetAssemblyDefinitionFilePathFromAssemblyName(name)
-                    ?.StartsWith(PackagesDirectory, StringComparison.Ordinal) != true)
-                .Concat(Compiled().Concat(Precompiled()).Where(inScenes.Contains))
-                .Where(IsKept)
-                .Distinct(StringComparer.Ordinal);
+            return ProjectAssemblies()
+                .Where(assembly => !assembly.Value && inScenes.Contains(assembly.Key) && IsKept(assembly.Key))
+                .Select(assembly => assembly.Key);
         }
 
-        private static IEnumerable<string> Compiled() =>
-            CompilationPipeline.GetAssemblies(AssembliesType.PlayerWithoutTestAssemblies).Select(assembly => assembly.name);
+        private static Dictionary<string, bool> ProjectAssemblies()
+        {
+            var assemblies = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (var plugin in PluginImporter.GetAllImporters())
+                if (!plugin.isNativePlugin)
+                    assemblies[Path.GetFileNameWithoutExtension(plugin.assetPath)] = false;
+            foreach (var assembly in CompilationPipeline.GetAssemblies(AssembliesType.PlayerWithoutTestAssemblies))
+                assemblies[assembly.name] =
+                    OutsidePackages(CompilationPipeline.GetAssemblyDefinitionFilePathFromAssemblyName(assembly.name));
+            foreach (var guid in AssetDatabase.FindAssets("t:" + nameof(AssemblyDefinitionAsset)))
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                var definition = AssetDatabase.LoadAssetAtPath<AssemblyDefinitionAsset>(path);
+                assemblies[JsonUtility.FromJson<Definition>(definition.text).name] = OutsidePackages(path);
+            }
+            return assemblies;
+        }
 
-        private static IEnumerable<string> Precompiled() =>
-            CompilationPipeline.GetPrecompiledAssemblyPaths(CompilationPipeline.PrecompiledAssemblySources.UserAssembly)
-                .Select(Path.GetFileNameWithoutExtension);
+        private static bool OutsidePackages(string path) =>
+            path?.StartsWith(PackagesDirectory, StringComparison.Ordinal) != true;
 
         private static bool IsKept(string name) =>
             !name.StartsWith(Prefix, StringComparison.Ordinal) && !name.StartsWith(Dependency, StringComparison.Ordinal);
 
-        private static void WriteLinkXml()
+        private static XElement Whole(string name) =>
+            new XElement("assembly", new XAttribute("fullname", name), new XAttribute("preserve", "all"),
+                new XAttribute("ignoreIfMissing", "1"), new XAttribute("ignoreIfUnreferenced", "1"));
+
+        private static void WriteLinkXml(ManagedStrippingLevel level)
         {
             var contents = EditorApplication.applicationContentsPath;
             var scripting = Path.Combine(contents, ScriptingDirectory);
@@ -186,6 +236,33 @@ namespace LightSide.Lean
                     linker.Add(assembly);
                 }
             }
+
+            var whole = ProjectAssemblies()
+                .Where(assembly => assembly.Value && IsKept(assembly.Key))
+                .Select(assembly => assembly.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            if (level == ManagedStrippingLevel.Minimal)
+                whole.UnionWith(EngineAssemblies().Where(engine => !engine.Value).Select(engine => engine.Key));
+            foreach (var name in whole.OrderBy(name => name, StringComparer.Ordinal)) linker.Add(Whole(name));
+
+            var components = TypeCache.GetTypesDerivedFrom<MonoBehaviour>().Append(typeof(MonoBehaviour))
+                .Concat(TypeCache.GetTypesDerivedFrom<ScriptableObject>())
+                .Where(type =>
+                {
+                    var assembly = type.Assembly.GetName().Name;
+                    return IsKept(assembly) && !whole.Contains(assembly) &&
+                           !assembly.StartsWith(EditorPrefix, StringComparison.Ordinal);
+                })
+                .GroupBy(type => type.Assembly.GetName().Name)
+                .OrderBy(group => group.Key, StringComparer.Ordinal);
+            foreach (var types in components)
+                linker.Add(new XElement("assembly", new XAttribute("fullname", types.Key),
+                    new XAttribute("ignoreIfMissing", "1"), new XAttribute("ignoreIfUnreferenced", "1"),
+                    types.Select(type => type.FullName.Replace('+', '/'))
+                        .OrderBy(name => name, StringComparer.Ordinal)
+                        .Select(name => new XElement("type", new XAttribute("fullname", name),
+                            new XAttribute("preserve", "methods"), new XAttribute("required", "false")))));
+
             new XDocument(linker).Save(LinkXml);
         }
 
